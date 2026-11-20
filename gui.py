@@ -238,7 +238,7 @@ class PumpEnergyApp(tk.Tk):
         self.system_fitting_frame.pack(fill="x")
         self.system_fitting_widgets = []
         for i, (name, coefficient) in enumerate(FITTING_CATALOG):
-            row, col = divmod(i, 4)
+            row, col = divmod(i, 2)
             col *= 2
             ttk.Label(self.system_fitting_frame, text=name).grid(row=row, column=col, sticky="w", padx=(3, 2), pady=2)
             var = tk.StringVar(value="0")
@@ -337,6 +337,11 @@ class PumpEnergyApp(tk.Tk):
         self.system_report = None
 
     def add_system_segment(self):
+        previous = getattr(self, "_system_previous_segment", None)
+        if previous is not None and 0 <= previous < len(self.system_segments):
+            for j, (var, _) in enumerate(self.system_fitting_widgets):
+                self.system_segments[previous]["fittings"][j].set(var.get())
+            self._refresh_segment_k(previous)
         index = len(self.system_segments)
         row = index + 1
         data = {"material": tk.StringVar(value="HDPE / PE"),
@@ -434,7 +439,10 @@ class PumpEnergyApp(tk.Tk):
         if len(self.system_segments) <= 1:
             messagebox.showwarning("System Curve", "At least one segment is required.")
             return
-        self._select_system_segment()
+        previous = getattr(self, "_system_previous_segment", None)
+        if previous is not None and 0 <= previous < len(self.system_segments):
+            for j, (var, _) in enumerate(self.system_fitting_widgets):
+                self.system_segments[previous]["fittings"][j].set(var.get())
         data = self.system_segments.pop()
         for widget in data["widgets"] + [data["row_label"]]:
             widget.destroy()
@@ -446,7 +454,11 @@ class PumpEnergyApp(tk.Tk):
 
     def calculate_system_curve(self):
         try:
-            self._select_system_segment()
+            previous = getattr(self, "_system_previous_segment", None)
+            if previous is not None and 0 <= previous < len(self.system_segments):
+                for j, (var, _) in enumerate(self.system_fitting_widgets):
+                    self.system_segments[previous]["fittings"][j].set(var.get())
+                self._refresh_segment_k(previous)
             us = self.system_units.get() == "US"
             def number(var, label):
                 value = float(var.get())

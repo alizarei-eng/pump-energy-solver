@@ -52,12 +52,12 @@ class PumpEnergyApp(tk.Tk):
             row = index % 8
             base = col * 3
             ttk.Label(frame, text=f"{title} ({key})").grid(row=row, column=base, sticky="w", padx=(0, 7), pady=5)
-            entry = ttk.Entry(frame, width=15)
+            entry = ttk.Entry(frame, width=9)
             entry.grid(row=row, column=base + 1, sticky="ew", padx=(0, 4), pady=5)
             ttk.Label(frame, text=unit if key not in PRESSURE_KEYS else "selected").grid(row=row, column=base + 2, sticky="w", padx=(0, 20), pady=5)
             self.entries[key] = entry
         for c in (1, 4):
-            frame.columnconfigure(c, weight=1)
+            frame.columnconfigure(c, weight=0)
 
         controls = ttk.Frame(self, padding=(16, 8))
         controls.pack(fill="x")

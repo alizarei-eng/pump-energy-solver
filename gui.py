@@ -6,6 +6,7 @@ from tkinter import ttk, messagebox, filedialog, simpledialog
 from datetime import datetime
 from pump_energy import FIELDS, NONNEGATIVE, POSITIVE, G, solve
 from water_properties import calculate_water_properties
+from hydraulics.system_curve import calculate_system_curve as compute_system_curve
 PRESSURE_TO_KPA = {"bar": 100.0, "psi": 6.894757293168, "kPa": 1.0, "Pa": 0.001}
 PRESSURE_KEYS = {"P1", "P2", "dP"}
 
@@ -584,35 +585,8 @@ class PumpEnergyApp(tk.Tk):
                     transition_losses.append(("Sudden contraction", 0.42*(1-(d2/d1)**2), 2.0))
             else:
                 transition_losses.append(("Gradual transition (user K)", current["transition_k"], 2.0))
-        static_head = dz + dp*1000/(rho*G)
-        flows = [qmax*i/(int(n)-1) for i in range(int(n))]
-        heads = []
-        segment_results = []
-        for q in flows:
-            total_loss = 0.0
-            per_segment = []
-            for seg in segments:
-                d = seg["diameter"]
-                v = (q/3600)/(math.pi*d*d/4)
-                re = v*d/nu
-                if re == 0:
-                    f = 0.0
-                elif re < 2300:
-                    f = 64/re
-                else:
-                    f = 0.25/math.log10(seg["roughness"]/1000/d/3.7+5.74/re**0.9)**2
-                major = f*seg["length"]/d*v*v/(2*G)
-                minor = seg["k"]*v*v/(2*G)
-                total_loss += major+minor
-                per_segment.append((v,re,f,major,minor))
-            for j, (kind, k_transition, reference) in enumerate(transition_losses):
-                if reference:
-                    ref_d = segments[j if reference == 1.0 else j+1]["diameter"]
-                    ref_v = (q/3600)/(math.pi*ref_d**2/4)
-                    total_loss += k_transition*ref_v**2/(2*G)
-            heads.append(static_head+total_loss)
-            segment_results.append(per_segment)
-        powers_kw = [rho * G * (q / 3600) * h / 1000 for q, h in zip(flows, heads)]
+        static_head, flows, heads, powers_kw, segment_results = compute_system_curve(
+            segments, transition_losses, dz, dp, rho, nu, qmax, n)
         if self.system_canvas is not None:
             self.system_canvas.get_tk_widget().destroy()
         fig = Figure(figsize=(5.2, 3.2), dpi=100)

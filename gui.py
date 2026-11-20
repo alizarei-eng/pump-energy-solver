@@ -636,6 +636,8 @@ class PumpEnergyApp(tk.Tk):
                    "For non-PE pipes, diameter input is the INTERNAL bore, not outside diameter.",
                    "Manufacturer fitting K and roughness should replace indicative reference values for final design."]
         self.system_report = "\n".join(report) + "\n"
+        qfactor = 4.402867539 if us else 1.0
+        hfactor = 3.280839895 if us else 1.0
         self.system_status.configure(text=f"{len(segments)} segments | Density: {rho:.4f} kg/m3 | "
             f"Results at maximum flow")
         self.system_result_label.configure(

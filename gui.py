@@ -7,6 +7,7 @@ from datetime import datetime
 from pump_energy import FIELDS, NONNEGATIVE, POSITIVE, G, solve
 from water_properties import calculate_water_properties
 from hydraulics.system_curve import calculate_system_curve as compute_system_curve
+from plotting.system_plot import build_system_figure
 PRESSURE_TO_KPA = {"bar": 100.0, "psi": 6.894757293168, "kPa": 1.0, "Pa": 0.001}
 PRESSURE_KEYS = {"P1", "P2", "dP"}
 
@@ -589,23 +590,7 @@ class PumpEnergyApp(tk.Tk):
             segments, transition_losses, dz, dp, rho, nu, qmax, n)
         if self.system_canvas is not None:
             self.system_canvas.get_tk_widget().destroy()
-        fig = Figure(figsize=(5.2, 3.2), dpi=100)
-        ax = fig.add_subplot(111)
-        qfactor = 4.402867539 if us else 1
-        hfactor = 3.280839895 if us else 1
-        flow_axis = [q*qfactor for q in flows]
-        head_line, = ax.plot(flow_axis, [h*hfactor for h in heads], linewidth=2, label="System head")
-        ax.set_xlabel("Flow Q (US gpm)" if us else "Flow Q (m3/h)")
-        ax.set_ylabel("Required head H (ft)" if us else "Required head H (m)", color=head_line.get_color())
-        power_ax = ax.twinx()
-        power_line, = power_ax.plot(flow_axis, powers_kw, color="red", linewidth=2,
-                                    label="Hydraulic power")
-        power_ax.set_ylabel("Hydraulic power (kW)", color="red")
-        power_ax.tick_params(axis="y", labelcolor="red")
-        ax.legend([head_line, power_line], ["System head", "Hydraulic power"], loc="upper left")
-        ax.set_title("System head and hydraulic power vs flow")
-        ax.grid(True, alpha=0.35)
-        fig.tight_layout()
+        fig = build_system_figure(flows, heads, powers_kw, us=us)
         self.system_canvas = FigureCanvasTkAgg(fig, master=self.system_plot_frame)
         self.system_canvas.draw()
         self.system_canvas.get_tk_widget().pack(fill="both", expand=True)

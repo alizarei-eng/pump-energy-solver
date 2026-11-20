@@ -1,5 +1,6 @@
 """Tkinter desktop interface for the existing Pump Energy Solver engine."""
 import math
+import json
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from datetime import datetime
@@ -251,6 +252,8 @@ class PumpEnergyApp(tk.Tk):
         plot_controls.pack(fill="x", pady=5)
         ttk.Button(plot_controls, text="Calculate System Curve", command=self.calculate_system_curve).pack(side="left", padx=4)
         ttk.Button(plot_controls, text="Export System TXT", command=self.export_system_txt).pack(side="left", padx=4)
+        ttk.Button(plot_controls, text="Save Project", command=self.save_system_project).pack(side="left", padx=4)
+        ttk.Button(plot_controls, text="Open Project", command=self.load_system_project).pack(side="left", padx=4)
         self.system_status = ttk.Label(plot_controls, text="Add pipe segments, then calculate.", wraplength=600)
         self.system_status.pack(side="left", padx=8)
         self.system_plot_frame = ttk.LabelFrame(system_tab, text="System H-Q diagram", padding=4)
@@ -663,6 +666,94 @@ class PumpEnergyApp(tk.Tk):
         self.system_report = "\n".join(report) + "\n"
         self.system_status.configure(text=f"{len(segments)} segments | rho={rho:.2f} kg/m3 | "
             f"H(max Q)={heads[-1]*hfactor:.2f} {'ft' if us else 'm'}")
+
+    def save_system_project(self):
+        """Persist editable System Curve inputs, not calculated outputs."""
+        project = {
+            "format": "pump-energy-solver.system-curve",
+            "version": 1,
+            "units": self.system_units.get(),
+            "fluid": self.system_fluid.get(),
+            "boundary": {key: var.get() for key, var in self.system_vars.items()},
+            "segments": [
+                {**{key: segment[key].get() for key in
+                    ("material", "length", "od", "sdr", "transition", "transition_k")},
+                 "fittings": [var.get() for var in segment["fittings"]]}
+                for segment in self.system_segments
+            ],
+        }
+        path = filedialog.asksaveasfilename(
+            title="Save System Curve Project", defaultextension=".json",
+            filetypes=[("System Curve project", "*.json")],
+            initialfile="system_curve_project.json")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as stream:
+                json.dump(project, stream, indent=2, ensure_ascii=False)
+            self.system_status.configure(text=f"Project saved: {path}")
+        except OSError as exc:
+            messagebox.showerror("Save Project", str(exc))
+
+    def load_system_project(self):
+        """Validate the whole file before changing the current project."""
+        path = filedialog.askopenfilename(
+            title="Open System Curve Project",
+            filetypes=[("System Curve project", "*.json"), ("JSON files", "*.json")])
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as stream:
+                project = json.load(stream)
+            if not isinstance(project, dict) or project.get("format") != "pump-energy-solver.system-curve" or project.get("version") != 1:
+                raise ValueError("Unsupported System Curve project format/version.")
+            if project.get("units") not in ("SI", "US") or project.get("fluid") not in ("seawater", "freshwater"):
+                raise ValueError("Invalid units or fluid.")
+            boundary = project.get("boundary")
+            if not isinstance(boundary, dict) or set(boundary) != set(self.system_vars) or not all(isinstance(v, str) for v in boundary.values()):
+                raise ValueError("Invalid boundary fields.")
+            segments = project.get("segments")
+            if not isinstance(segments, list) or not 1 <= len(segments) <= 100:
+                raise ValueError("Project must contain 1 to 100 segments.")
+            allowed_transitions = ("Not installed", "Sudden", "Gradual (manual K)")
+            for i, segment in enumerate(segments):
+                if not isinstance(segment, dict):
+                    raise ValueError(f"Invalid segment {i+1}.")
+                if segment.get("material") not in PIPE_TYPES or segment.get("transition") not in allowed_transitions:
+                    raise ValueError(f"Invalid material or transition in segment {i+1}.")
+                for key in ("length", "od", "sdr", "transition_k"):
+                    if not isinstance(segment.get(key), str):
+                        raise ValueError(f"Invalid {key} in segment {i+1}.")
+                if not isinstance(segment.get("fittings"), list) or len(segment["fittings"]) != len(FITTING_CATALOG) or not all(isinstance(v, str) for v in segment["fittings"]):
+                    raise ValueError(f"Invalid fittings in segment {i+1}.")
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            messagebox.showerror("Open Project", f"Could not load project: {exc}")
+            return
+
+        # Rebuild only after successful structural validation. Disable unit
+        # conversion during restoration so saved numbers remain unchanged.
+        self._system_previous_units = project["units"]
+        self.system_units.set(project["units"])
+        self.system_fluid.set(project["fluid"])
+        for key, value in boundary.items():
+            self.system_vars[key].set(value)
+        for segment in self.system_segments:
+            for widget in segment["widgets"] + [segment["row_label"]]:
+                widget.destroy()
+        self.system_segments.clear()
+        for saved in segments:
+            self.add_system_segment()
+            current = self.system_segments[-1]
+            for key in ("material", "length", "od", "sdr", "transition_k"):
+                current[key].set(saved[key])
+            current["transition"].set(saved["transition"])
+            for var, value in zip(current["fittings"], saved["fittings"]):
+                var.set(value)
+            self._update_system_fitting_summary()
+        self.system_segment_selector.set("1")
+        self._update_system_fitting_summary()
+        self.system_report = None
+        self.system_status.configure(text="Project loaded. Click Calculate System Curve to refresh results.")
 
     def export_system_txt(self):
         if not self.system_report:

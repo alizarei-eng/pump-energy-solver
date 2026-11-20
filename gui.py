@@ -200,7 +200,6 @@ class PumpEnergyApp(tk.Tk):
                  ("dp", "Pressure difference", "0"),
                  ("temp", "Water temperature", "30"),
                  ("ec", "In-situ EC (mS/cm)", "58"),
-                 ("equipment", "Equipment loss (head)", "0"),
                  ("qmax", "Maximum flow", ""),
                  ("points", "Plot points", "50"))
         self.system_widgets, self.system_unit_labels = {}, {}
@@ -232,19 +231,22 @@ class PumpEnergyApp(tk.Tk):
         for col, name in enumerate(("Segment", "Material", "Length", "OD / bore", "SDR (PE)", "Roughness mm", "Fittings K")):
             ttk.Label(self.system_segments_frame, text=name).grid(row=0, column=col, padx=4, pady=3)
 
-        fitting_box = ttk.LabelFrame(system_tab, text="Fittings & valves | Enter quantities only for selected segment", padding=5)
+        fitting_box = ttk.LabelFrame(system_tab, text="Fittings for selected segment", padding=5)
         fitting_box.pack(fill="x", pady=4)
         self.system_fitting_frame = ttk.Frame(fitting_box)
         self.system_fitting_frame.pack(fill="x")
         self.system_fitting_widgets = []
-        for i, (name, coefficient) in enumerate(FITTING_CATALOG):
-            row, col = divmod(i, 2)
-            col *= 2
-            ttk.Label(self.system_fitting_frame, text=name).grid(row=row, column=col, sticky="w", padx=(3, 2), pady=2)
-            var = tk.StringVar(value="0")
-            entry = ttk.Entry(self.system_fitting_frame, textvariable=var, width=4)
-            entry.grid(row=row, column=col+1, padx=(0, 9), pady=2)
-            self.system_fitting_widgets.append((var, entry))
+        self.system_fitting_picker = tk.StringVar(value=FITTING_CATALOG[0][0])
+        ttk.Combobox(self.system_fitting_frame, textvariable=self.system_fitting_picker,
+                     values=[name for name, _ in FITTING_CATALOG], state="readonly", width=34).pack(side="left", padx=4)
+        ttk.Label(self.system_fitting_frame, text="Quantity").pack(side="left")
+        self.system_fitting_quantity = tk.StringVar(value="1")
+        ttk.Spinbox(self.system_fitting_frame, textvariable=self.system_fitting_quantity,
+                    from_=1, to=999, width=5).pack(side="left", padx=4)
+        ttk.Button(self.system_fitting_frame, text="Add / Update", command=self._add_system_fitting).pack(side="left", padx=4)
+        ttk.Button(self.system_fitting_frame, text="Remove", command=self._remove_system_fitting).pack(side="left", padx=4)
+        self.system_fitting_summary = ttk.Label(fitting_box, text="No fittings for this segment.", wraplength=850)
+        self.system_fitting_summary.pack(anchor="w", pady=3)
 
         plot_controls = ttk.Frame(system_tab)
         plot_controls.pack(fill="x", pady=5)
@@ -337,11 +339,6 @@ class PumpEnergyApp(tk.Tk):
         self.system_report = None
 
     def add_system_segment(self):
-        previous = getattr(self, "_system_previous_segment", None)
-        if previous is not None and 0 <= previous < len(self.system_segments):
-            for j, (var, _) in enumerate(self.system_fitting_widgets):
-                self.system_segments[previous]["fittings"][j].set(var.get())
-            self._refresh_segment_k(previous)
         index = len(self.system_segments)
         row = index + 1
         data = {"material": tk.StringVar(value="HDPE / PE"),
@@ -378,8 +375,7 @@ class PumpEnergyApp(tk.Tk):
         self.system_segments.append(data)
         self.system_segment_selector.configure(values=[str(i+1) for i in range(len(self.system_segments))])
         self.system_segment_selector.set(str(len(self.system_segments)))
-        self._system_previous_segment = len(self.system_segments) - 1
-        self._load_selected_fittings()
+        self._update_system_fitting_summary()
         self.system_report = None
 
     def _segment_material_changed(self, data):
@@ -388,77 +384,69 @@ class PumpEnergyApp(tk.Tk):
         data["widgets"][3].configure(state="normal" if material == "HDPE / PE" else "disabled")
         self.system_report = None
 
-    def _save_selected_fittings(self):
-        if not self.system_segments:
-            return
+    def _selected_system_segment(self):
         try:
             index = int(self.system_segment_selector.get()) - 1
+            if 0 <= index < len(self.system_segments):
+                return index
         except ValueError:
-            return
-        if 0 <= index < len(self.system_segments):
-            data = self.system_segments[index]
-            for i, (var, _) in enumerate(self.system_fitting_widgets):
-                data["fittings"][i].set(var.get())
-            try:
-                k = sum(int(float(v.get())) * FITTING_CATALOG[i][1] for i, v in enumerate(data["fittings"]))
-                data["klabel"].configure(text=f"{k:.3g}")
-            except ValueError:
-                data["klabel"].configure(text="?")
+            pass
+        return None
 
-    def _load_selected_fittings(self):
-        try:
-            index = int(self.system_segment_selector.get()) - 1
-        except ValueError:
+    def _update_system_fitting_summary(self):
+        index = self._selected_system_segment()
+        if index is None:
             return
-        if 0 <= index < len(self.system_segments):
-            for i, (var, _) in enumerate(self.system_fitting_widgets):
-                var.set(self.system_segments[index]["fittings"][i].get())
+        data = self.system_segments[index]
+        details = []
+        ktotal = 0.0
+        for j, var in enumerate(data["fittings"]):
+            count = int(var.get())
+            if count:
+                name, coefficient = FITTING_CATALOG[j]
+                details.append(f"{name} x{count}")
+                ktotal += count * coefficient
+        data["klabel"].configure(text=f"{ktotal:.3g}")
+        self.system_fitting_summary.configure(
+            text=f"Segment {index+1}: " + (", ".join(details) if details else "No fittings selected.")
+                 + f" | Total K = {ktotal:.3g}")
 
-    def _select_system_segment(self, event=None):
-        previous = getattr(self, "_system_previous_segment", None)
-        if previous is not None and 0 <= previous < len(self.system_segments):
-            for i, (var, _) in enumerate(self.system_fitting_widgets):
-                self.system_segments[previous]["fittings"][i].set(var.get())
-            self._refresh_segment_k(previous)
-        self._load_selected_fittings()
+    def _add_system_fitting(self):
+        index = self._selected_system_segment()
+        if index is None:
+            return
         try:
-            self._system_previous_segment = int(self.system_segment_selector.get()) - 1
+            quantity = int(self.system_fitting_quantity.get())
+            if not 1 <= quantity <= 999:
+                raise ValueError
         except ValueError:
-            self._system_previous_segment = None
+            messagebox.showerror("Fittings", "Enter a whole-number quantity from 1 to 999.")
+            return
+        name = self.system_fitting_picker.get()
+        item = next((j for j, (label, _) in enumerate(FITTING_CATALOG) if label == name), None)
+        if item is None:
+            return
+        self.system_segments[index]["fittings"][item].set(str(quantity))
+        self._update_system_fitting_summary()
         self.system_report = None
 
-    def _refresh_segment_k(self, index):
-        data = self.system_segments[index]
-        try:
-            k = sum(int(float(v.get())) * FITTING_CATALOG[i][1] for i, v in enumerate(data["fittings"]))
-            data["klabel"].configure(text=f"{k:.3g}")
-        except ValueError:
-            data["klabel"].configure(text="?")
-
-    def remove_system_segment(self):
-        if len(self.system_segments) <= 1:
-            messagebox.showwarning("System Curve", "At least one segment is required.")
+    def _remove_system_fitting(self):
+        index = self._selected_system_segment()
+        if index is None:
             return
-        previous = getattr(self, "_system_previous_segment", None)
-        if previous is not None and 0 <= previous < len(self.system_segments):
-            for j, (var, _) in enumerate(self.system_fitting_widgets):
-                self.system_segments[previous]["fittings"][j].set(var.get())
-        data = self.system_segments.pop()
-        for widget in data["widgets"] + [data["row_label"]]:
-            widget.destroy()
-        self.system_segment_selector.configure(values=[str(i+1) for i in range(len(self.system_segments))])
-        self.system_segment_selector.set(str(len(self.system_segments)))
-        self._system_previous_segment = len(self.system_segments) - 1
-        self._load_selected_fittings()
+        name = self.system_fitting_picker.get()
+        item = next((j for j, (label, _) in enumerate(FITTING_CATALOG) if label == name), None)
+        if item is not None:
+            self.system_segments[index]["fittings"][item].set("0")
+            self._update_system_fitting_summary()
+            self.system_report = None
+
+    def _select_system_segment(self, event=None):
+        self._update_system_fitting_summary()
         self.system_report = None
 
     def calculate_system_curve(self):
         try:
-            previous = getattr(self, "_system_previous_segment", None)
-            if previous is not None and 0 <= previous < len(self.system_segments):
-                for j, (var, _) in enumerate(self.system_fitting_widgets):
-                    self.system_segments[previous]["fittings"][j].set(var.get())
-                self._refresh_segment_k(previous)
             us = self.system_units.get() == "US"
             def number(var, label):
                 value = float(var.get())
@@ -469,11 +457,10 @@ class PumpEnergyApp(tk.Tk):
             dp = number(self.system_vars["dp"], "Pressure") * (6.894757293168 if us else 1)
             t = number(self.system_vars["temp"], "Temperature")
             temp = (t - 32)*5/9 if us else t
-            equipment = number(self.system_vars["equipment"], "Equipment") * (0.3048 if us else 1)
             qmax = number(self.system_vars["qmax"], "Maximum flow") * (0.22712470704 if us else 1)
             n = number(self.system_vars["points"], "Plot points")
-            if qmax <= 0 or equipment < 0 or n != int(n) or not 2 <= n <= 500:
-                raise ValueError("Maximum flow > 0, equipment >= 0 and plot points 2..500 required.")
+            if qmax <= 0 or n != int(n) or not 2 <= n <= 500:
+                raise ValueError("Maximum flow > 0 and plot points 2..500 required.")
             fluid = self.system_fluid.get()
             ec = number(self.system_vars["ec"], "EC") if fluid == "seawater" else None
             props = calculate_water_properties(temperature_C=temp, water_type=fluid,
@@ -533,7 +520,7 @@ class PumpEnergyApp(tk.Tk):
                 minor = seg["k"]*v*v/(2*G)
                 total_loss += major+minor
                 per_segment.append((v,re,f,major,minor))
-            heads.append(static_head+equipment+total_loss)
+            heads.append(static_head+total_loss)
             segment_results.append(per_segment)
         if self.system_canvas is not None:
             self.system_canvas.get_tk_widget().destroy()
@@ -558,7 +545,7 @@ class PumpEnergyApp(tk.Tk):
                   f"Density: {rho:.8g} kg/m3 | Kinematic viscosity: {nu:.8g} m2/s",
                   f"Dynamic viscosity: {props.get('dynamic_viscosity_Pa_s')} Pa.s",
                   f"Elevation: {dz:.7g} m | Pressure difference: {dp:.7g} kPa",
-                  f"Constant equipment loss: {equipment:.7g} m | Static head: {static_head:.7g} m",
+                  f"Static head: {static_head:.7g} m",
                   f"Maximum flow: {qmax:.7g} m3/h | Plot points: {int(n)}",
                   "Fitting K values from pipe-pressure-loss-calculator/databases/fittings.json (indicative)."]
         for seg in segments:

@@ -30,6 +30,8 @@ class PumpEnergyApp(tk.Tk):
         self.curve_rows = []
         self.curve_canvas = None
         self.curve_figure = None
+        self.system_vars = {}
+        self.system_canvas = None
         self.fluid = tk.StringVar(value="seawater")
         self.temperature = tk.StringVar(value="30")
         self.ec = tk.StringVar(value="58")
@@ -46,7 +48,7 @@ class PumpEnergyApp(tk.Tk):
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=16, pady=8)
         tab_names = ["Flow & Geometry", "Pressure & Elevation", "Fluid & Losses",
-                     "Pump Performance", "Pump Q-H Curve", "Results & Report"]
+                     "Pump Performance", "Pump Q-H Curve", "System Curve", "Results & Report"]
         self.tab_frames = {}
         for name in tab_names:
             tab = ttk.Frame(self.tabs, padding=16)
@@ -159,6 +161,37 @@ class PumpEnergyApp(tk.Tk):
         for _ in range(6):
             self.add_curve_row()
 
+        system_tab = self.tab_frames["System Curve"]
+        ttk.Label(system_tab, text="System head curve | H = H_static + H_friction + H_minor",
+                  font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        ttk.Label(system_tab, text="Independent hydraulic model. Enter pipe data and calculate the system curve.").pack(anchor="w", pady=(4, 8))
+        system_body = ttk.Frame(system_tab)
+        system_body.pack(fill="both", expand=True)
+        system_inputs = ttk.LabelFrame(system_body, text="System parameters", padding=10)
+        system_inputs.pack(side="left", fill="y", padx=(0, 12))
+        self.system_plot_frame = ttk.LabelFrame(system_body, text="System H-Q diagram", padding=8)
+        self.system_plot_frame.pack(side="left", fill="both", expand=True)
+        specs = (
+            ("static", "Static head / pressure equivalent", "m", ""),
+            ("length", "Total pipe length", "m", ""),
+            ("diameter", "Internal pipe diameter", "mm", ""),
+            ("roughness", "Absolute roughness", "mm", "0.0015"),
+            ("k", "Total fittings loss coefficient K", "-", "0"),
+            ("nu", "Kinematic viscosity", "m2/s", "0.000001"),
+            ("qmax", "Maximum flow for plot", "m3/h", ""),
+            ("points", "Number of plot points", "-", "50"),
+        )
+        for row, (key, label, unit, default) in enumerate(specs):
+            ttk.Label(system_inputs, text=label).grid(row=row, column=0, sticky="w", pady=5)
+            var = tk.StringVar(value=default)
+            self.system_vars[key] = var
+            ttk.Entry(system_inputs, textvariable=var, width=11).grid(row=row, column=1, padx=7, pady=5)
+            ttk.Label(system_inputs, text=unit).grid(row=row, column=2, sticky="w")
+        ttk.Button(system_inputs, text="Calculate System Curve", command=self.calculate_system_curve).grid(
+            row=len(specs), column=0, columnspan=3, sticky="ew", pady=12)
+        self.system_status = ttk.Label(system_tab, text="Enter system data to plot H(Q).", wraplength=780)
+        self.system_status.pack(anchor="w", pady=6)
+
         results_tab = self.tab_frames["Results & Report"]
         controls = ttk.Frame(results_tab, padding=(0, 0, 0, 10))
         controls.pack(fill="x")
@@ -189,6 +222,60 @@ class PumpEnergyApp(tk.Tk):
         self._display("Enter only the values you know, then click Calculate.\n"
                       "Unknown values are not assumed to be zero.\n"
                       "Shaft power (Ps) is mechanical power, not electrical input power.")
+
+    def calculate_system_curve(self):
+        try:
+            vals = {key: float(var.get()) for key, var in self.system_vars.items()}
+            if not all(math.isfinite(v) for v in vals.values()):
+                raise ValueError("All system parameters must be finite numbers.")
+            if vals["length"] < 0 or vals["diameter"] <= 0 or vals["roughness"] < 0 or vals["k"] < 0:
+                raise ValueError("Length, roughness and K must be nonnegative; diameter must be positive.")
+            if vals["nu"] <= 0 or vals["qmax"] <= 0 or not 2 <= vals["points"] <= 500:
+                raise ValueError("Viscosity and maximum flow must be positive; point count must be 2 to 500.")
+            if vals["points"] != int(vals["points"]):
+                raise ValueError("Number of plot points must be an integer.")
+        except ValueError as exc:
+            messagebox.showerror("System curve", str(exc))
+            return
+        try:
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        except ImportError:
+            messagebox.showerror("Missing dependency", "Install matplotlib: python -m pip install matplotlib")
+            return
+        diameter = vals["diameter"] / 1000
+        area = math.pi * diameter ** 2 / 4
+        flows = [vals["qmax"] * i / (int(vals["points"]) - 1) for i in range(int(vals["points"]))]
+        heads = []
+        for flow in flows:
+            velocity = flow / 3600 / area
+            re = velocity * diameter / vals["nu"]
+            if re == 0:
+                f = 0.0
+            elif re < 2300:
+                f = 64 / re
+            else:
+                f = 0.25 / math.log10(vals["roughness"] / 1000 / diameter / 3.7 + 5.74 / re ** 0.9) ** 2
+            loss = (f * vals["length"] / diameter + vals["k"]) * velocity ** 2 / (2 * G)
+            heads.append(vals["static"] + loss)
+        if self.system_canvas is not None:
+            self.system_canvas.get_tk_widget().destroy()
+        fig = Figure(figsize=(5.2, 4), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.plot(flows, heads, linewidth=2)
+        ax.set_xlabel("Flow Q (m3/h)")
+        ax.set_ylabel("Required head H (m)")
+        ax.set_title("System characteristic curve")
+        ax.grid(True, alpha=0.35)
+        fig.tight_layout()
+        self.system_canvas = FigureCanvasTkAgg(fig, master=self.system_plot_frame)
+        self.system_canvas.draw()
+        self.system_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.system_status.configure(text=(
+            f"Calculated {len(flows)} points. H(0)={heads[0]:.2f} m; "
+            f"H({flows[-1]:.2f} m3/h)={heads[-1]:.2f} m. "
+            "Single constant-diameter pipe equivalent; transitional flow approximated."
+        ))
 
     def calculate_curve(self):
         try:

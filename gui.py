@@ -123,7 +123,8 @@ class PumpEnergyApp(tk.Tk):
     def clear_results(self):
         self.report = None
         self.export_button.configure(state="disabled")
-        self._display("Results cleared.")\n        self.summary_label.configure(text="Calculate to display pump performance.")
+        self._display("Results cleared.")
+        self.summary_label.configure(text="Calculate to display pump performance.")
 
     def clear_inputs(self):
         for entry in self.entries.values():

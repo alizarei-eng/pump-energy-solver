@@ -256,8 +256,12 @@ class PumpEnergyApp(tk.Tk):
         ttk.Button(plot_controls, text="Export System TXT", command=self.export_system_txt).pack(side="left", padx=4)
         ttk.Button(plot_controls, text="Save Project", command=self.save_system_project).pack(side="left", padx=4)
         ttk.Button(plot_controls, text="Open Project", command=self.load_system_project).pack(side="left", padx=4)
-        self.system_status = ttk.Label(plot_controls, text="Add pipe segments, then calculate.", wraplength=600)
-        self.system_status.pack(side="left", padx=8)
+        self.system_status = ttk.Label(system_tab, text="Add pipe segments, then calculate.", anchor="w")
+        self.system_status.pack(fill="x", padx=8, pady=(4, 1))
+        self.system_result_label = ttk.Label(system_tab,
+            text="Flow: --  |  System head: --  |  Hydraulic power: --",
+            anchor="w", font=("TkDefaultFont", 11, "bold"))
+        self.system_result_label.pack(fill="x", padx=8, pady=(1, 5))
         self.system_plot_frame = ttk.LabelFrame(system_tab, text="System H-Q diagram", padding=4)
         self.system_plot_frame.pack(fill="both", expand=True)
         self.system_units.trace_add("write", lambda *_: self._update_system_units())
@@ -632,9 +636,13 @@ class PumpEnergyApp(tk.Tk):
                    "For non-PE pipes, diameter input is the INTERNAL bore, not outside diameter.",
                    "Manufacturer fitting K and roughness should replace indicative reference values for final design."]
         self.system_report = "\n".join(report) + "\n"
-        self.system_status.configure(text=f"{len(segments)} segments | rho={rho:.2f} kg/m3 | "
-            f"H(max Q)={heads[-1]*hfactor:.2f} {'ft' if us else 'm'} | "
-            f"Hydraulic power={powers_kw[-1]:.2f} kW ({powers_kw[-1]*1.34102209:.2f} hp)")
+        self.system_status.configure(text=f"{len(segments)} segments | Density: {rho:.4f} kg/m3 | "
+            f"Results at maximum flow")
+        self.system_result_label.configure(
+            text=f"Flow: {qmax*qfactor:.4f} {'US gpm' if us else 'm3/h'}  |  "
+                 f"System head: {heads[-1]*hfactor:.4f} {'ft' if us else 'm'}  |  "
+                 f"Hydraulic power: {powers_kw[-1]:.4f} kW "
+                 f"({powers_kw[-1]*1.34102209:.4f} hp)")
 
     def save_system_project(self):
         """Persist editable System Curve inputs, not calculated outputs."""

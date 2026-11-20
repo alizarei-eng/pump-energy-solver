@@ -200,8 +200,7 @@ class PumpEnergyApp(tk.Tk):
                  ("dp", "Pressure difference", "0"),
                  ("temp", "Water temperature", "30"),
                  ("ec", "In-situ EC (mS/cm)", "58"),
-                 ("qmax", "Maximum flow", ""),
-)
+                 ("qmax", "Maximum flow", ""))
         self.system_widgets, self.system_unit_labels = {}, {}
         for index, (key, label, default) in enumerate(specs):
             col = (index % 4) * 3
@@ -299,7 +298,7 @@ class PumpEnergyApp(tk.Tk):
             return 1.0
         return {"dz": 3.280839895, "dp": 0.1450377377,
                 "length": 3.280839895, "od": 1/25.4,
-                "equipment": 3.280839895, "qmax": 4.402867539}.get(key, 1.0)
+                "qmax": 4.402867539}.get(key, 1.0)
 
     def _update_system_units(self):
         current = self.system_units.get()
@@ -328,7 +327,7 @@ class PumpEnergyApp(tk.Tk):
         self._system_previous_units = current
         us = current == "US"
         units = {"dz": "ft" if us else "m", "dp": "psi" if us else "kPa",
-                 "temp": "F" if us else "C", "equipment": "ft" if us else "m",
+                 "temp": "F" if us else "C",
                  "qmax": "US gpm" if us else "m3/h"}
         for key, label in self.system_unit_labels.items():
             label.configure(text=units.get(key, ""))

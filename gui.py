@@ -227,7 +227,7 @@ class PumpEnergyApp(tk.Tk):
         self.system_segment_selector.bind("<<ComboboxSelected>>", self._select_system_segment)
         self.system_segments_frame = ttk.Frame(pipe_box)
         self.system_segments_frame.pack(fill="x")
-        for col, name in enumerate(("Segment", "Material", "Length", "OD (PE) / ID (other)", "SDR (PE)", "Roughness mm", "Fittings K")):
+        for col, name in enumerate(("Segment", "Material", "Length", "OD (PE) / ID (other)", "SDR (PE)", "Roughness mm", "Fittings K", "Transition from previous", "Transition K")):
             ttk.Label(self.system_segments_frame, text=name).grid(row=0, column=col, padx=4, pady=3)
 
         fitting_box = ttk.LabelFrame(system_tab, text="Fittings for selected segment", padding=5)
@@ -345,7 +345,9 @@ class PumpEnergyApp(tk.Tk):
                 "od": tk.StringVar(value=""),
                 "sdr": tk.StringVar(value="11"),
                 "roughness": tk.StringVar(value="0.0015"),
-                "fittings": [tk.StringVar(value="0") for _ in FITTING_CATALOG]}
+                "fittings": [tk.StringVar(value="0") for _ in FITTING_CATALOG],
+                "transition": tk.StringVar(value="Not installed"),
+                "transition_k": tk.StringVar(value="0")}
         widgets = []
         ttk.Label(self.system_segments_frame, text=str(row)).grid(row=row, column=0)
         material = ttk.Combobox(self.system_segments_frame, textvariable=data["material"],
@@ -367,6 +369,14 @@ class PumpEnergyApp(tk.Tk):
         klabel = ttk.Label(self.system_segments_frame, text="0")
         klabel.grid(row=row, column=6, padx=3)
         widgets.append(klabel)
+        transition = ttk.Combobox(self.system_segments_frame, textvariable=data["transition"],
+                                  values=("Not installed", "Sudden", "Gradual (manual K)"),
+                                  state="readonly", width=20)
+        transition.grid(row=row, column=7, padx=3)
+        widgets.append(transition)
+        transition_k = ttk.Entry(self.system_segments_frame, textvariable=data["transition_k"], width=9)
+        transition_k.grid(row=row, column=8, padx=3)
+        widgets.append(transition_k)
         data["widgets"] = widgets
         data["klabel"] = klabel
         data["row_label"] = self.system_segments_frame.grid_slaves(row=row, column=0)[0]
@@ -520,9 +530,15 @@ class PumpEnergyApp(tk.Tk):
                         name, kref = FITTING_CATALOG[j]
                         fittings.append((name, int(count), kref))
                 total_k = sum(count*kref for _,count,kref in fittings)
+                transition = data["transition"].get()
+                transition_k = (number(data["transition_k"], f"Segment {index} transition K")
+                                if index > 1 and transition == "Gradual (manual K)" else 0.0)
+                if transition_k < 0:
+                    raise ValueError(f"Segment {index} transition K must be nonnegative.")
                 segments.append({"index": index, "material": material, "length": length,
                                  "od": od, "sdr": sdr, "diameter": diameter/1000,
-                                 "roughness": roughness, "fittings": fittings, "k": total_k})
+                                 "roughness": roughness, "fittings": fittings, "k": total_k,
+                                 "transition": transition, "transition_k": transition_k})
         except (ValueError, TypeError, ArithmeticError, OverflowError) as exc:
             messagebox.showerror("System Curve", f"Invalid input: {exc}")
             return
@@ -532,6 +548,27 @@ class PumpEnergyApp(tk.Tk):
         except ImportError:
             messagebox.showerror("Missing dependency", "Install matplotlib: python -m pip install matplotlib")
             return
+        transition_losses = []
+        for previous, current in zip(segments, segments[1:]):
+            d1, d2 = previous["diameter"], current["diameter"]
+            if math.isclose(d1, d2, rel_tol=1e-6):
+                transition_losses.append(("Same diameter", 0.0, 0.0))
+                continue
+            choice = current["transition"]
+            if choice == "Not installed":
+                if not messagebox.askyesno("Diameter change",
+                    f"Segments {previous['index']} and {current['index']} have different IDs "
+                    f"({d1*1000:.1f} -> {d2*1000:.1f} mm).\n"
+                    "No transition fitting is selected. Continue without its local loss?"):
+                    return
+                transition_losses.append(("Not modeled", 0.0, 0.0))
+            elif choice == "Sudden":
+                if d2 > d1:  # Borda-Carnot: (V1-V2)^2/(2g), referenced to V1
+                    transition_losses.append(("Sudden expansion", (1-(d1/d2)**2)**2, 1.0))
+                else:  # Approximate sharp-edged contraction, referenced to V2
+                    transition_losses.append(("Sudden contraction", 0.42*(1-(d2/d1)**2), 2.0))
+            else:
+                transition_losses.append(("Gradual transition (user K)", current["transition_k"], 2.0))
         static_head = dz + dp*1000/(rho*G)
         flows = [qmax*i/(int(n)-1) for i in range(int(n))]
         heads = []
@@ -553,6 +590,11 @@ class PumpEnergyApp(tk.Tk):
                 minor = seg["k"]*v*v/(2*G)
                 total_loss += major+minor
                 per_segment.append((v,re,f,major,minor))
+            for j, (kind, k_transition, reference) in enumerate(transition_losses):
+                if reference:
+                    ref_d = segments[j if reference == 1.0 else j+1]["diameter"]
+                    ref_v = (q/3600)/(math.pi*ref_d**2/4)
+                    total_loss += k_transition*ref_v**2/(2*G)
             heads.append(static_head+total_loss)
             segment_results.append(per_segment)
         if self.system_canvas is not None:
@@ -592,6 +634,9 @@ class PumpEnergyApp(tk.Tk):
                        for name,count,kref in seg["fittings"]]
             if not seg["fittings"]:
                 report.append("  No fittings selected.")
+        report += ["", "DIAMETER TRANSITIONS (between adjacent segments)"]
+        report += [f"{j+1} -> {j+2}: {kind}; K={k:.7g}; reference={'upstream' if ref == 1.0 else 'downstream' if ref == 2.0 else 'none'}"
+                   for j, (kind, k, ref) in enumerate(transition_losses)]
         report += ["", "FLOW TABLE (SI)", "Q [m3/h] | Total head [m] | Segment | Velocity [m/s] | Re | Darcy f | Major [m] | Minor [m]"]
         for q,h,per in zip(flows,heads,segment_results):
             for seg, (v,re,f,major,minor) in zip(segments,per):
@@ -599,7 +644,8 @@ class PumpEnergyApp(tk.Tk):
         report += ["", "Water property warnings:"] + [str(x) for x in props.get("warnings", [])]
         report += ["Water property assumptions:"] + [str(x) for x in props.get("assumptions", [])]
         report += ["Assumptions: series pipe, constant flow through segments, no branches.",
-                   "No explicit reducer/expander losses unless counted as fittings.",
+                   "Transition losses included when selected; sudden contraction K is approximate.",
+                   "Gradual transition K must be supplied by user; unselected changes omit transition loss.",
                    "For non-PE pipes, diameter input is the INTERNAL bore, not outside diameter.",
                    "Manufacturer fitting K and roughness should replace indicative reference values for final design."]
         self.system_report = "\n".join(report) + "\n"

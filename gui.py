@@ -159,9 +159,10 @@ class PumpEnergyApp(tk.Tk):
         for _ in range(6):
             self.add_curve_row()
 
-        controls = ttk.Frame(self, padding=(16, 8))
+        results_tab = self.tab_frames["Results & Report"]
+        controls = ttk.Frame(results_tab, padding=(0, 0, 0, 10))
         controls.pack(fill="x")
-        ttk.Button(controls, text="Calculate", command=self.calculate).pack(side="left", padx=(0, 8))
+        ttk.Button(controls, text="Calculate Main Solver", command=self.calculate).pack(side="left", padx=(0, 8))
         ttk.Button(controls, text="Clear inputs", command=self.clear_inputs).pack(side="left", padx=(0, 8))
         ttk.Button(controls, text="Clear results", command=self.clear_results).pack(side="left", padx=(0, 8))
         self.export_button = ttk.Button(controls, text="Export TXT", command=self.export_txt, state="disabled")

@@ -64,3 +64,18 @@ The engine can also solve inverse problems (for example shaft power + efficiency
 - A negative computed pump head or hydraulic power may indicate a turbine-like operating condition; this first version targets pumps and flags negative power.
 - Missing independent data remain unknown; no water density, efficiency, head loss, or elevation defaults are silently imposed.
 - This is a preliminary engineering tool. Validate against hand calculations and equipment curves before design decisions.
+
+## Tkinter desktop GUI
+
+Install the water-property dependencies and launch the GUI:
+
+```bash
+python -m pip install -r requirements.txt
+python gui.py
+```
+
+The GUI calculates water density automatically. Choose freshwater or natural seawater, enter temperature (°C), and for seawater enter **in-situ EC (mS/cm)** measured at the actual water temperature (not EC compensated to 25 °C). Freshwater density uses IAPWS-IF97; seawater uses PSS-78 / TEOS-10 via GSW. Water properties are evaluated at standard atmospheric pressure, an approximation for pressurized systems.
+
+The pressure unit selector supports **bar, psi, kPa and Pa** for inlet pressure, outlet pressure and pressure difference. All are converted to kPa before calling the existing calculation engine; results display in the selected unit. P1 and P2 must use the same gauge reference. Pressure differences do not have a gauge/absolute reference.
+
+Density is not an editable parameter in the GUI. It is reported as a calculated property in the results and TXT export. The CLI (`pump_energy.py`) remains unchanged and retains its manual density input. Pump shaft power is mechanical, not electrical input power.

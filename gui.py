@@ -1,7 +1,7 @@
 """Tkinter desktop interface for the existing Pump Energy Solver engine."""
 import math
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 from datetime import datetime
 from pump_energy import FIELDS, NONNEGATIVE, POSITIVE, G, solve
 from water_properties import calculate_water_properties
@@ -227,7 +227,7 @@ class PumpEnergyApp(tk.Tk):
         self.system_segment_selector.bind("<<ComboboxSelected>>", self._select_system_segment)
         self.system_segments_frame = ttk.Frame(pipe_box)
         self.system_segments_frame.pack(fill="x")
-        for col, name in enumerate(("Segment", "Material", "Length", "OD (PE) / ID (other)", "SDR (PE)", "Roughness mm", "Fittings K", "Transition from previous", "Transition K")):
+        for col, name in enumerate(("Segment", "Material", "Length", "OD (PE) / ID (other)", "SDR (PE)", "Roughness mm", "Fittings K", "Connection from previous")):
             ttk.Label(self.system_segments_frame, text=name).grid(row=0, column=col, padx=4, pady=3)
 
         fitting_box = ttk.LabelFrame(system_tab, text="Fittings for selected segment", padding=5)
@@ -373,10 +373,9 @@ class PumpEnergyApp(tk.Tk):
                                   values=("Not installed", "Sudden", "Gradual (manual K)"),
                                   state="readonly", width=20)
         transition.grid(row=row, column=7, padx=3)
+        transition.configure(state="disabled" if index == 0 else "readonly")
+        transition.bind("<<ComboboxSelected>>", lambda event, d=data: self._transition_changed(d))
         widgets.append(transition)
-        transition_k = ttk.Entry(self.system_segments_frame, textvariable=data["transition_k"], width=9)
-        transition_k.grid(row=row, column=8, padx=3)
-        widgets.append(transition_k)
         data["widgets"] = widgets
         data["klabel"] = klabel
         data["row_label"] = self.system_segments_frame.grid_slaves(row=row, column=0)[0]
@@ -403,10 +402,23 @@ class PumpEnergyApp(tk.Tk):
             segment["row_label"].grid(row=row, column=0)
             for col, widget in enumerate(segment["widgets"], start=1):
                 widget.grid(row=row, column=col)
+            segment["widgets"][-1].configure(state="disabled" if row == 1 else "readonly")
         self.system_segment_selector.configure(
             values=[str(i + 1) for i in range(len(self.system_segments))])
         self.system_segment_selector.set(str(min(index, len(self.system_segments)-1) + 1))
         self._update_system_fitting_summary()
+        self.system_report = None
+
+    def _transition_changed(self, data):
+        """One connection selector per boundary; prompt for gradual K only when needed."""
+        if data["transition"].get() == "Gradual (manual K)":
+            value = simpledialog.askfloat("Gradual transition",
+                "Enter transition loss coefficient K (referenced to downstream velocity):",
+                parent=self, initialvalue=float(data["transition_k"].get()), minvalue=0.0)
+            if value is None:
+                data["transition"].set("Not installed")
+            else:
+                data["transition_k"].set(str(value))
         self.system_report = None
 
     def _segment_material_changed(self, data):

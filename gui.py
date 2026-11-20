@@ -13,6 +13,19 @@ KW_PER_METRIC_HP = 0.73549875
 PE_MRS_MPA = {"PE80": 8.0, "PE100": 10.0, "PE100-RC": 10.0}
 SDR_OPTIONS = ("6", "7.4", "9", "11", "13.6", "17", "17.6", "21", "26", "33", "41")
 PIPE_TYPES = ("HDPE / PE", "PVC", "Steel", "Other")
+FITTING_CATALOG = (
+    ("90-degree elbow - long radius", 0.2),
+    ("90-degree elbow - standard", 0.9),
+    ("45-degree elbow", 0.4),
+    ("Tee - straight run", 0.6),
+    ("Tee - branch flow", 1.8),
+    ("Gate valve - fully open", 0.15),
+    ("Ball valve - fully open", 0.05),
+    ("Globe valve - fully open", 10.0),
+    ("Swing check valve", 2.0),
+    ("Sharp-edged pipe entrance", 0.5),
+    ("Pipe exit into large tank", 1.0),
+)  # From pipe-pressure-loss-calculator/databases/fittings.json; indicative K values
 SYSTEM_ROUGHNESS_MM = {"HDPE / PE": 0.0015, "PVC": 0.0015, "Steel": 0.045, "Other": 0.05}  # indicative clean-pipe references, not certified catalogs
 
 class PumpEnergyApp(tk.Tk):
@@ -34,6 +47,8 @@ class PumpEnergyApp(tk.Tk):
         self.system_vars = {}
         self.system_canvas = None
         self.system_report = None
+        self.system_segments = []
+        self.system_selected_segment = tk.IntVar(value=0)
         self.system_units = tk.StringVar(value="SI")
         self.system_fluid = tk.StringVar(value="seawater")
         self.fluid = tk.StringVar(value="seawater")
@@ -166,67 +181,84 @@ class PumpEnergyApp(tk.Tk):
             self.add_curve_row()
 
         system_tab = self.tab_frames["System Curve"]
-        ttk.Label(system_tab, text="System Curve | Standalone hydraulic calculation", font=("Segoe UI", 12, "bold")).pack(anchor="w")
-        ttk.Label(system_tab, text="Units and fluid properties are managed within this tab. Pipe roughness is an indicative reference.").pack(anchor="w", pady=(2, 6))
+        ttk.Label(system_tab, text="System Curve | Multi-segment pipe and fitting losses",
+                  font=("Segoe UI", 12, "bold")).pack(anchor="w")
         selectors = ttk.Frame(system_tab)
-        selectors.pack(fill="x", pady=3)
+        selectors.pack(fill="x", pady=5)
         ttk.Label(selectors, text="Units").pack(side="left")
-        ttk.Combobox(selectors, textvariable=self.system_units, values=("SI", "US"), state="readonly", width=7).pack(side="left", padx=6)
-        ttk.Label(selectors, text="Water type").pack(side="left", padx=(12, 0))
-        ttk.Combobox(selectors, textvariable=self.system_fluid, values=("seawater", "freshwater"), state="readonly", width=12).pack(side="left", padx=6)
+        ttk.Combobox(selectors, textvariable=self.system_units, values=("SI", "US"),
+                     state="readonly", width=7).pack(side="left", padx=5)
+        ttk.Label(selectors, text="Water type").pack(side="left", padx=(10, 0))
+        ttk.Combobox(selectors, textvariable=self.system_fluid, values=("seawater", "freshwater"),
+                     state="readonly", width=12).pack(side="left", padx=5)
         self.system_unit_note = ttk.Label(selectors, text="")
-        self.system_unit_note.pack(side="left", padx=8)
-        system_body = ttk.Frame(system_tab)
-        system_body.pack(fill="both", expand=True)
-        system_inputs = ttk.LabelFrame(system_body, text="System inputs", padding=8)
-        system_inputs.pack(side="left", fill="y", padx=(0, 8))
-        self.system_plot_frame = ttk.LabelFrame(system_body, text="System H-Q diagram", padding=6)
-        self.system_plot_frame.pack(side="left", fill="both", expand=True)
-        specs = (
-            ("dz", "Elevation difference", "0"),
-            ("dp", "Pressure difference", "0"),
-            ("temp", "Water temperature", "30"),
-            ("ec", "In-situ EC (mS/cm)", "58"),
-            ("length", "Pipe length", ""),
-            ("material", "Pipe material", "HDPE / PE"),
-            ("od", "Outside diameter", ""),
-            ("sdr", "PE SDR", "11"),
-            ("roughness", "Reference roughness (mm)", ""),
-            ("k", "Total fittings K", "0"),
-            ("equipment", "Equipment loss (head)", "0"),
-            ("qmax", "Maximum flow", ""),
-            ("points", "Plot points", "50"),
-        )
-        self.system_widgets = {}
-        self.system_unit_labels = {}
-        for row, (key, label, default) in enumerate(specs):
-            ttk.Label(system_inputs, text=label).grid(row=row, column=0, sticky="w", pady=3)
+        self.system_unit_note.pack(side="left", padx=6)
+
+        globals_box = ttk.LabelFrame(system_tab, text="System boundary conditions", padding=5)
+        globals_box.pack(fill="x")
+        specs = (("dz", "Elevation difference", "0"),
+                 ("dp", "Pressure difference", "0"),
+                 ("temp", "Water temperature", "30"),
+                 ("ec", "In-situ EC (mS/cm)", "58"),
+                 ("equipment", "Equipment loss (head)", "0"),
+                 ("qmax", "Maximum flow", ""),
+                 ("points", "Plot points", "50"))
+        self.system_widgets, self.system_unit_labels = {}, {}
+        for index, (key, label, default) in enumerate(specs):
+            col = (index % 4) * 3
+            row = index // 4
+            ttk.Label(globals_box, text=label).grid(row=row, column=col, sticky="w", padx=3, pady=3)
             var = tk.StringVar(value=default)
             self.system_vars[key] = var
-            if key == "material":
-                widget = ttk.Combobox(system_inputs, textvariable=var, values=PIPE_TYPES, state="readonly", width=12)
-            elif key == "sdr":
-                widget = ttk.Combobox(system_inputs, textvariable=var, values=SDR_OPTIONS, width=11)
-            else:
-                widget = ttk.Entry(system_inputs, textvariable=var, width=12)
-            widget.grid(row=row, column=1, padx=5, pady=3)
+            widget = ttk.Entry(globals_box, textvariable=var, width=10)
+            widget.grid(row=row, column=col+1, padx=3)
             self.system_widgets[key] = widget
-            unit_label = ttk.Label(system_inputs, text="")
-            unit_label.grid(row=row, column=2, sticky="w")
-            self.system_unit_labels[key] = unit_label
-        self.system_vars["material"].trace_add("write", lambda *_: self._toggle_system_pipe())
+            unit = ttk.Label(globals_box, text="")
+            unit.grid(row=row, column=col+2, sticky="w")
+            self.system_unit_labels[key] = unit
+
+        pipe_box = ttk.LabelFrame(system_tab, text="Pipe segments (series, no branches)", padding=5)
+        pipe_box.pack(fill="x", pady=5)
+        pipe_bar = ttk.Frame(pipe_box)
+        pipe_bar.pack(fill="x")
+        ttk.Button(pipe_bar, text="Add Segment", command=self.add_system_segment).pack(side="left", padx=3)
+        ttk.Button(pipe_bar, text="Remove Selected", command=self.remove_system_segment).pack(side="left", padx=3)
+        ttk.Label(pipe_bar, text="Selected segment for fittings:").pack(side="left", padx=(15, 4))
+        self.system_segment_selector = ttk.Combobox(pipe_bar, state="readonly", width=10)
+        self.system_segment_selector.pack(side="left")
+        self.system_segment_selector.bind("<<ComboboxSelected>>", self._select_system_segment)
+        self.system_segments_frame = ttk.Frame(pipe_box)
+        self.system_segments_frame.pack(fill="x")
+        for col, name in enumerate(("Segment", "Material", "Length", "OD / bore", "SDR (PE)", "Roughness mm", "Fittings K")):
+            ttk.Label(self.system_segments_frame, text=name).grid(row=0, column=col, padx=4, pady=3)
+
+        fitting_box = ttk.LabelFrame(system_tab, text="Fittings & valves | Enter quantities only for selected segment", padding=5)
+        fitting_box.pack(fill="x", pady=4)
+        self.system_fitting_frame = ttk.Frame(fitting_box)
+        self.system_fitting_frame.pack(fill="x")
+        self.system_fitting_widgets = []
+        for i, (name, coefficient) in enumerate(FITTING_CATALOG):
+            row, col = divmod(i, 4)
+            col *= 2
+            ttk.Label(self.system_fitting_frame, text=name).grid(row=row, column=col, sticky="w", padx=(3, 2), pady=2)
+            var = tk.StringVar(value="0")
+            entry = ttk.Entry(self.system_fitting_frame, textvariable=var, width=4)
+            entry.grid(row=row, column=col+1, padx=(0, 9), pady=2)
+            self.system_fitting_widgets.append((var, entry))
+
+        plot_controls = ttk.Frame(system_tab)
+        plot_controls.pack(fill="x", pady=5)
+        ttk.Button(plot_controls, text="Calculate System Curve", command=self.calculate_system_curve).pack(side="left", padx=4)
+        ttk.Button(plot_controls, text="Export System TXT", command=self.export_system_txt).pack(side="left", padx=4)
+        self.system_status = ttk.Label(plot_controls, text="Add pipe segments, then calculate.", wraplength=600)
+        self.system_status.pack(side="left", padx=8)
+        self.system_plot_frame = ttk.LabelFrame(system_tab, text="System H-Q diagram", padding=4)
+        self.system_plot_frame.pack(fill="both", expand=True)
         self.system_units.trace_add("write", lambda *_: self._update_system_units())
         self.system_fluid.trace_add("write", lambda *_: self._toggle_system_fluid())
-        self._toggle_system_pipe()
         self._update_system_units()
         self._toggle_system_fluid()
-        ttk.Button(system_inputs, text="Calculate System Curve", command=self.calculate_system_curve).grid(
-            row=len(specs), column=0, columnspan=3, sticky="ew", pady=(10, 3))
-        ttk.Button(system_inputs, text="Export System TXT", command=self.export_system_txt).grid(
-            row=len(specs)+1, column=0, columnspan=3, sticky="ew", pady=3)
-        self.system_status = ttk.Label(system_tab, text="Enter system inputs and calculate.", wraplength=850)
-        self.system_status.pack(anchor="w", pady=5)
-
+        self.add_system_segment()
         results_tab = self.tab_frames["Results & Report"]
         controls = ttk.Frame(results_tab, padding=(0, 0, 0, 10))
         controls.pack(fill="x")
@@ -258,88 +290,209 @@ class PumpEnergyApp(tk.Tk):
                       "Unknown values are not assumed to be zero.\n"
                       "Shaft power (Ps) is mechanical power, not electrical input power.")
 
+    def _system_factor(self, key, us=None):
+        if us is None:
+            us = self.system_units.get() == "US"
+        if not us:
+            return 1.0
+        return {"dz": 3.280839895, "dp": 0.1450377377,
+                "length": 3.280839895, "od": 1/25.4,
+                "equipment": 3.280839895, "qmax": 4.402867539}.get(key, 1.0)
+
     def _update_system_units(self):
-        us = self.system_units.get() == "US"
-        labels = {"dz": "ft" if us else "m", "dp": "psi" if us else "kPa",
-                  "temp": "F" if us else "C", "length": "ft" if us else "m",
-                  "od": "in" if us else "mm", "equipment": "ft" if us else "m",
-                  "qmax": "US gpm" if us else "m3/h"}
-        for key, label in self.system_unit_labels.items():
-            label.configure(text=labels.get(key, ""))
-        self.system_unit_note.configure(text="Changing units converts entered values.")
-        # Unit conversion is performed when the selection changes via trace, using prior mode.
-        previous = getattr(self, "_system_previous_units", "SI")
         current = self.system_units.get()
+        previous = getattr(self, "_system_previous_units", current)
         if previous != current:
-            factors = {"dz": 3.280839895, "dp": 0.1450377377,
-                       "length": 3.280839895, "od": 1/25.4,
-                       "equipment": 3.280839895, "qmax": 4.402867539}
-            for key, factor in factors.items():
-                raw = self.system_vars[key].get().strip()
-                if raw:
-                    try:
-                        val = float(raw) * (factor if current == "US" else 1/factor)
-                        self.system_vars[key].set(f"{val:.9g}")
-                    except ValueError:
-                        pass
-            raw = self.system_vars["temp"].get().strip()
-            if raw:
+            for key in ("dz", "dp", "equipment", "qmax"):
+                var = self.system_vars[key]
                 try:
-                    val = float(raw)
-                    self.system_vars["temp"].set(f"{(val*9/5+32) if current == 'US' else ((val-32)*5/9):.9g}")
+                    val = float(var.get()) / self._system_factor(key, previous == "US")
+                    var.set(f"{val * self._system_factor(key, current == 'US'):.10g}")
                 except ValueError:
                     pass
+            try:
+                t = float(self.system_vars["temp"].get())
+                self.system_vars["temp"].set(f"{(t*9/5+32) if current == 'US' else (t-32)*5/9:.10g}")
+            except ValueError:
+                pass
+            for segment in self.system_segments:
+                for key in ("length", "od"):
+                    try:
+                        value = float(segment[key].get()) / self._system_factor(key, previous == "US")
+                        segment[key].set(f"{value * self._system_factor(key, current == 'US'):.10g}")
+                    except ValueError:
+                        pass
             self.system_report = None
         self._system_previous_units = current
+        us = current == "US"
+        units = {"dz": "ft" if us else "m", "dp": "psi" if us else "kPa",
+                 "temp": "F" if us else "C", "equipment": "ft" if us else "m",
+                 "qmax": "US gpm" if us else "m3/h"}
+        for key, label in self.system_unit_labels.items():
+            label.configure(text=units.get(key, ""))
+        self.system_unit_note.configure(text="Pipe length: ft | diameter: in" if us else "Pipe length: m | diameter: mm")
 
     def _toggle_system_fluid(self):
         self.system_widgets["ec"].configure(state="normal" if self.system_fluid.get() == "seawater" else "disabled")
         self.system_report = None
 
-    def _toggle_system_pipe(self):
-        pe = self.system_vars["material"].get() == "HDPE / PE"
-        self.system_widgets["sdr"].configure(state="normal" if pe else "disabled")
-        self.system_vars["roughness"].set(str(SYSTEM_ROUGHNESS_MM[self.system_vars["material"].get()]))
-        self.system_widgets["roughness"].configure(state="readonly")
+    def add_system_segment(self):
+        index = len(self.system_segments)
+        row = index + 1
+        data = {"material": tk.StringVar(value="HDPE / PE"),
+                "length": tk.StringVar(value=""),
+                "od": tk.StringVar(value=""),
+                "sdr": tk.StringVar(value="11"),
+                "roughness": tk.StringVar(value="0.0015"),
+                "fittings": [tk.StringVar(value="0") for _ in FITTING_CATALOG]}
+        widgets = []
+        ttk.Label(self.system_segments_frame, text=str(row)).grid(row=row, column=0)
+        material = ttk.Combobox(self.system_segments_frame, textvariable=data["material"],
+                                values=PIPE_TYPES, state="readonly", width=11)
+        material.grid(row=row, column=1, padx=3)
+        widgets.append(material)
+        for col, key, width in ((2, "length", 9), (3, "od", 10)):
+            entry = ttk.Entry(self.system_segments_frame, textvariable=data[key], width=width)
+            entry.grid(row=row, column=col, padx=3)
+            widgets.append(entry)
+        sdr = ttk.Combobox(self.system_segments_frame, textvariable=data["sdr"],
+                           values=SDR_OPTIONS, width=8)
+        sdr.grid(row=row, column=4, padx=3)
+        widgets.append(sdr)
+        roughness = ttk.Entry(self.system_segments_frame, textvariable=data["roughness"],
+                              state="readonly", width=11)
+        roughness.grid(row=row, column=5, padx=3)
+        widgets.append(roughness)
+        klabel = ttk.Label(self.system_segments_frame, text="0")
+        klabel.grid(row=row, column=6, padx=3)
+        widgets.append(klabel)
+        data["widgets"] = widgets
+        data["klabel"] = klabel
+        data["row_label"] = self.system_segments_frame.grid_slaves(row=row, column=0)[0]
+        data["material"].trace_add("write", lambda *_ , d=data: self._segment_material_changed(d))
+        self.system_segments.append(data)
+        self.system_segment_selector.configure(values=[str(i+1) for i in range(len(self.system_segments))])
+        self.system_segment_selector.set(str(len(self.system_segments)))
+        self._system_previous_segment = len(self.system_segments) - 1
+        self._load_selected_fittings()
+        self.system_report = None
+
+    def _segment_material_changed(self, data):
+        material = data["material"].get()
+        data["roughness"].set(str(SYSTEM_ROUGHNESS_MM.get(material, 0.05)))
+        data["widgets"][3].configure(state="normal" if material == "HDPE / PE" else "disabled")
+        self.system_report = None
+
+    def _save_selected_fittings(self):
+        if not self.system_segments:
+            return
+        try:
+            index = int(self.system_segment_selector.get()) - 1
+        except ValueError:
+            return
+        if 0 <= index < len(self.system_segments):
+            data = self.system_segments[index]
+            for i, (var, _) in enumerate(self.system_fitting_widgets):
+                data["fittings"][i].set(var.get())
+            try:
+                k = sum(int(float(v.get())) * FITTING_CATALOG[i][1] for i, v in enumerate(data["fittings"]))
+                data["klabel"].configure(text=f"{k:.3g}")
+            except ValueError:
+                data["klabel"].configure(text="?")
+
+    def _load_selected_fittings(self):
+        try:
+            index = int(self.system_segment_selector.get()) - 1
+        except ValueError:
+            return
+        if 0 <= index < len(self.system_segments):
+            for i, (var, _) in enumerate(self.system_fitting_widgets):
+                var.set(self.system_segments[index]["fittings"][i].get())
+
+    def _select_system_segment(self, event=None):
+        previous = getattr(self, "_system_previous_segment", None)
+        if previous is not None and 0 <= previous < len(self.system_segments):
+            for i, (var, _) in enumerate(self.system_fitting_widgets):
+                self.system_segments[previous]["fittings"][i].set(var.get())
+            self._refresh_segment_k(previous)
+        self._load_selected_fittings()
+        try:
+            self._system_previous_segment = int(self.system_segment_selector.get()) - 1
+        except ValueError:
+            self._system_previous_segment = None
+        self.system_report = None
+
+    def _refresh_segment_k(self, index):
+        data = self.system_segments[index]
+        try:
+            k = sum(int(float(v.get())) * FITTING_CATALOG[i][1] for i, v in enumerate(data["fittings"]))
+            data["klabel"].configure(text=f"{k:.3g}")
+        except ValueError:
+            data["klabel"].configure(text="?")
+
+    def remove_system_segment(self):
+        if len(self.system_segments) <= 1:
+            messagebox.showwarning("System Curve", "At least one segment is required.")
+            return
+        self._select_system_segment()
+        data = self.system_segments.pop()
+        for widget in data["widgets"] + [data["row_label"]]:
+            widget.destroy()
+        self.system_segment_selector.configure(values=[str(i+1) for i in range(len(self.system_segments))])
+        self.system_segment_selector.set(str(len(self.system_segments)))
+        self._system_previous_segment = len(self.system_segments) - 1
+        self._load_selected_fittings()
         self.system_report = None
 
     def calculate_system_curve(self):
         try:
+            self._select_system_segment()
             us = self.system_units.get() == "US"
-            def number(key):
-                value = float(self.system_vars[key].get())
+            def number(var, label):
+                value = float(var.get())
                 if not math.isfinite(value):
-                    raise ValueError(f"{key} must be finite.")
+                    raise ValueError(f"{label} must be finite.")
                 return value
-            dz = number("dz") * (0.3048 if us else 1)
-            dp = number("dp") * (6.894757293168 if us else 1)
-            temp = (number("temp") - 32) * 5/9 if us else number("temp")
-            length = number("length") * (0.3048 if us else 1)
-            od = number("od") * (25.4 if us else 1)
-            qmax = number("qmax") * (0.22712470704 if us else 1)
-            equipment = number("equipment") * (0.3048 if us else 1)
-            k = number("k")
-            roughness = number("roughness")
-            n = number("points")
-            material = self.system_vars["material"].get()
-            sdr = number("sdr") if material == "HDPE / PE" else None
-            if material == "HDPE / PE" and sdr <= 2:
-                raise ValueError("SDR must exceed 2.")
-            diameter_mm = od * (1 - 2 / sdr) if sdr is not None else od
-            if not (diameter_mm > 0 and length >= 0 and qmax > 0 and k >= 0 and equipment >= 0):
-                raise ValueError("Diameter and flow must be positive; length, K and equipment loss nonnegative.")
-            if n != int(n) or not 2 <= n <= 500:
-                raise ValueError("Plot points must be an integer from 2 to 500.")
-            water_type = self.system_fluid.get()
-            ec = number("ec") if water_type == "seawater" else None
-            props = calculate_water_properties(temperature_C=temp, water_type=water_type,
+            dz = number(self.system_vars["dz"], "Elevation") * (0.3048 if us else 1)
+            dp = number(self.system_vars["dp"], "Pressure") * (6.894757293168 if us else 1)
+            t = number(self.system_vars["temp"], "Temperature")
+            temp = (t - 32)*5/9 if us else t
+            equipment = number(self.system_vars["equipment"], "Equipment") * (0.3048 if us else 1)
+            qmax = number(self.system_vars["qmax"], "Maximum flow") * (0.22712470704 if us else 1)
+            n = number(self.system_vars["points"], "Plot points")
+            if qmax <= 0 or equipment < 0 or n != int(n) or not 2 <= n <= 500:
+                raise ValueError("Maximum flow > 0, equipment >= 0 and plot points 2..500 required.")
+            fluid = self.system_fluid.get()
+            ec = number(self.system_vars["ec"], "EC") if fluid == "seawater" else None
+            props = calculate_water_properties(temperature_C=temp, water_type=fluid,
                 EC_value=ec, EC_unit="mS/cm" if ec is not None else None)
-            rho = props["density_kg_m3"]
-            nu = props["kinematic_viscosity_m2_s"]
+            rho, nu = props["density_kg_m3"], props["kinematic_viscosity_m2_s"]
             if not rho or not nu or rho <= 0 or nu <= 0:
-                raise ValueError("Water property model did not return valid density and viscosity.")
+                raise ValueError("Fluid property calculation returned invalid density or viscosity.")
+            segments = []
+            for index, data in enumerate(self.system_segments, 1):
+                material = data["material"].get()
+                length = number(data["length"], f"Segment {index} length") * (0.3048 if us else 1)
+                od = number(data["od"], f"Segment {index} diameter") * (25.4 if us else 1)
+                sdr = number(data["sdr"], f"Segment {index} SDR") if material == "HDPE / PE" else None
+                diameter = od * (1 - 2/sdr) if sdr is not None else od
+                roughness = number(data["roughness"], f"Segment {index} roughness")
+                if length < 0 or diameter <= 0 or roughness < 0 or (sdr is not None and sdr <= 2):
+                    raise ValueError(f"Invalid geometry for segment {index}.")
+                fittings = []
+                for j, var in enumerate(data["fittings"]):
+                    count = number(var, f"Segment {index} fitting {j+1}")
+                    if count < 0 or int(count) != count:
+                        raise ValueError(f"Segment {index} fitting counts must be nonnegative integers.")
+                    if count:
+                        name, kref = FITTING_CATALOG[j]
+                        fittings.append((name, int(count), kref))
+                total_k = sum(count*kref for _,count,kref in fittings)
+                segments.append({"index": index, "material": material, "length": length,
+                                 "od": od, "sdr": sdr, "diameter": diameter/1000,
+                                 "roughness": roughness, "fittings": fittings, "k": total_k})
         except (ValueError, TypeError, ArithmeticError, OverflowError) as exc:
-            messagebox.showerror("System curve", f"Invalid input: {exc}")
+            messagebox.showerror("System Curve", f"Invalid input: {exc}")
             return
         try:
             from matplotlib.figure import Figure
@@ -347,31 +500,36 @@ class PumpEnergyApp(tk.Tk):
         except ImportError:
             messagebox.showerror("Missing dependency", "Install matplotlib: python -m pip install matplotlib")
             return
-        diameter = diameter_mm / 1000
-        area = math.pi * diameter**2 / 4
-        flows = [qmax * i / (int(n) - 1) for i in range(int(n))]
-        static_head = dz + dp * 1000 / (rho * G)
-        heads, reynolds, factors = [], [], []
-        for flow in flows:
-            velocity = flow / 3600 / area
-            re = velocity * diameter / nu
-            if re == 0:
-                f = 0.0
-            elif re < 2300:
-                f = 64 / re
-            else:
-                f = 0.25 / math.log10(roughness / 1000 / diameter / 3.7 + 5.74 / re**0.9)**2
-            loss = (f * length / diameter + k) * velocity**2 / (2 * G)
-            heads.append(static_head + equipment + loss)
-            reynolds.append(re)
-            factors.append(f)
+        static_head = dz + dp*1000/(rho*G)
+        flows = [qmax*i/(int(n)-1) for i in range(int(n))]
+        heads = []
+        segment_results = []
+        for q in flows:
+            total_loss = 0.0
+            per_segment = []
+            for seg in segments:
+                d = seg["diameter"]
+                v = (q/3600)/(math.pi*d*d/4)
+                re = v*d/nu
+                if re == 0:
+                    f = 0.0
+                elif re < 2300:
+                    f = 64/re
+                else:
+                    f = 0.25/math.log10(seg["roughness"]/1000/d/3.7+5.74/re**0.9)**2
+                major = f*seg["length"]/d*v*v/(2*G)
+                minor = seg["k"]*v*v/(2*G)
+                total_loss += major+minor
+                per_segment.append((v,re,f,major,minor))
+            heads.append(static_head+equipment+total_loss)
+            segment_results.append(per_segment)
         if self.system_canvas is not None:
             self.system_canvas.get_tk_widget().destroy()
-        fig = Figure(figsize=(5.2, 4), dpi=100)
+        fig = Figure(figsize=(5.2, 3.2), dpi=100)
         ax = fig.add_subplot(111)
-        flow_factor = 4.402867539 if us else 1
-        head_factor = 3.280839895 if us else 1
-        ax.plot([q*flow_factor for q in flows], [h*head_factor for h in heads], linewidth=2)
+        qfactor = 4.402867539 if us else 1
+        hfactor = 3.280839895 if us else 1
+        ax.plot([q*qfactor for q in flows], [h*hfactor for h in heads], linewidth=2)
         ax.set_xlabel("Flow Q (US gpm)" if us else "Flow Q (m3/h)")
         ax.set_ylabel("Required head H (ft)" if us else "Required head H (m)")
         ax.set_title("System characteristic curve")
@@ -380,39 +538,49 @@ class PumpEnergyApp(tk.Tk):
         self.system_canvas = FigureCanvasTkAgg(fig, master=self.system_plot_frame)
         self.system_canvas.draw()
         self.system_canvas.get_tk_widget().pack(fill="both", expand=True)
-        lines = ["SYSTEM CURVE | ENGINEERING REPORT", f"Timestamp: {datetime.now().isoformat(timespec='seconds')}",
-                 f"Selected units: {self.system_units.get()}", f"Water: {water_type}",
-                 f"Temperature: {temp:.6g} C", f"In-situ EC: {ec if ec is not None else 'N/A'} mS/cm",
-                 f"Property model: {props.get('method')}", f"Density: {rho:.7g} kg/m3",
-                 f"Dynamic viscosity: {props.get('dynamic_viscosity_Pa_s')} Pa.s",
-                 f"Kinematic viscosity: {nu:.8g} m2/s",
-                 f"Material: {material}", f"Outside diameter: {od:.6g} mm",
-                 f"SDR: {sdr if sdr is not None else 'N/A'}",
-                 f"Calculated internal diameter: {diameter_mm:.6g} mm",
-                 f"Roughness: {roughness:.6g} mm (indicative clean-pipe reference, verify manufacturer)",
-                 f"Pipe length: {length:.6g} m", f"Elevation difference: {dz:.6g} m",
-                 f"Pressure difference: {dp:.6g} kPa", f"Total fittings K: {k:.6g}",
-                 f"Constant equipment loss: {equipment:.6g} m",
-                 f"Maximum flow: {qmax:.6g} m3/h", f"Plot points: {int(n)}",
-                 f"Static head (without equipment): {static_head:.6g} m",
-                 "Method: Darcy-Weisbach; laminar 64/Re; turbulent Swamee-Jain approximation.",
-                 "Assumptions: constant diameter, steady flow, constant equipment head loss.",
-                 "Water EC must be in-situ, not temperature compensated. Natural seawater only.",
-                 "Roughness is a reference estimate, not a verified manufacturer catalog.",
-                 "Flow [m3/h] | Head [m] | Re [-] | Darcy f [-]"]
-        lines += [f"{q:.7g} | {h:.7g} | {re:.7g} | {f:.7g}" for q,h,re,f in zip(flows,heads,reynolds,factors)]
-        lines += ["Water property warnings:"] + [str(x) for x in props.get("warnings", [])]
-        lines += ["Water property assumptions:"] + [str(x) for x in props.get("assumptions", [])]
-        self.system_report = "\n".join(lines) + "\n"
-        self.system_status.configure(text=f"ID={diameter_mm:.2f} mm | rho={rho:.2f} kg/m3 | nu={nu:.3g} m2/s | "
-            f"H(max Q)={heads[-1]*head_factor:.2f} {'ft' if us else 'm'}")
+        report = ["SYSTEM CURVE | MULTI-SEGMENT ENGINEERING REPORT",
+                  f"Timestamp: {datetime.now().isoformat(timespec='seconds')}",
+                  f"Units: {self.system_units.get()} (internal calculations in SI)",
+                  f"Fluid: {fluid} | Temperature: {temp:.6g} C | In-situ EC: {ec} mS/cm",
+                  f"Fluid model: {props.get('method')}",
+                  f"Density: {rho:.8g} kg/m3 | Kinematic viscosity: {nu:.8g} m2/s",
+                  f"Dynamic viscosity: {props.get('dynamic_viscosity_Pa_s')} Pa.s",
+                  f"Elevation: {dz:.7g} m | Pressure difference: {dp:.7g} kPa",
+                  f"Constant equipment loss: {equipment:.7g} m | Static head: {static_head:.7g} m",
+                  f"Maximum flow: {qmax:.7g} m3/h | Plot points: {int(n)}",
+                  "Fitting K values from pipe-pressure-loss-calculator/databases/fittings.json (indicative)."]
+        for seg in segments:
+            report += [f"", f"SEGMENT {seg['index']}",
+                       f"Material: {seg['material']} | Length: {seg['length']:.7g} m",
+                       f"OD / nominal bore: {seg['od']:.7g} mm | SDR: {seg['sdr']}",
+                       f"Calculated internal diameter: {seg['diameter']*1000:.7g} mm",
+                       f"Roughness: {seg['roughness']:.7g} mm (indicative reference)",
+                       f"Total K: {seg['k']:.7g}"]
+            report += [f"  {name}: count={count}, K/unit={kref:g}, K subtotal={count*kref:g}"
+                       for name,count,kref in seg["fittings"]]
+            if not seg["fittings"]:
+                report.append("  No fittings selected.")
+        report += ["", "FLOW TABLE (SI)", "Q [m3/h] | Total head [m] | Segment | Velocity [m/s] | Re | Darcy f | Major [m] | Minor [m]"]
+        for q,h,per in zip(flows,heads,segment_results):
+            for seg, (v,re,f,major,minor) in zip(segments,per):
+                report.append(f"{q:.8g} | {h:.8g} | {seg['index']} | {v:.8g} | {re:.8g} | {f:.8g} | {major:.8g} | {minor:.8g}")
+        report += ["", "Water property warnings:"] + [str(x) for x in props.get("warnings", [])]
+        report += ["Water property assumptions:"] + [str(x) for x in props.get("assumptions", [])]
+        report += ["Assumptions: series pipe, constant flow through segments, no branches.",
+                   "No explicit reducer/expander losses unless counted as fittings.",
+                   "For non-PE pipes, diameter input is the INTERNAL bore, not outside diameter.",
+                   "Manufacturer fitting K and roughness should replace indicative reference values for final design."]
+        self.system_report = "\n".join(report) + "\n"
+        self.system_status.configure(text=f"{len(segments)} segments | rho={rho:.2f} kg/m3 | "
+            f"H(max Q)={heads[-1]*hfactor:.2f} {'ft' if us else 'm'}")
 
     def export_system_txt(self):
         if not self.system_report:
-            messagebox.showwarning("System curve", "Calculate System Curve before exporting.")
+            messagebox.showwarning("System Curve", "Calculate System Curve before exporting.")
             return
-        path = filedialog.asksaveasfilename(title="Export System Curve TXT", defaultextension=".txt",
-            filetypes=[("Text files", "*.txt")], initialfile="system_curve_report.txt")
+        path = filedialog.asksaveasfilename(title="Export System Curve TXT",
+            defaultextension=".txt", filetypes=[("Text files", "*.txt")],
+            initialfile="system_curve_report.txt")
         if path:
             with open(path, "w", encoding="utf-8") as file:
                 file.write(self.system_report)

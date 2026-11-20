@@ -4,6 +4,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 from pump_energy import FIELDS, NONNEGATIVE, POSITIVE, G, solve
+from water_properties import calculate_water_properties
+PRESSURE_TO_KPA = {"bar": 100.0, "psi": 6.894757293168, "kPa": 1.0, "Pa": 0.001}
+PRESSURE_KEYS = {"P1", "P2", "dP"}
 
 AUTHOR = "Ali_zarei_eng"
 
@@ -11,9 +14,13 @@ class PumpEnergyApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("PUMP ENERGY SOLVER")
-        self.geometry("1040x770")
-        self.minsize(820, 600)
+        self.geometry("1200x820")
+        self.minsize(1000, 650)
         self.entries = {}
+        self.fluid = tk.StringVar(value="seawater")
+        self.temperature = tk.StringVar(value="30")
+        self.ec = tk.StringVar(value="58")
+        self.pressure_unit = tk.StringVar(value="kPa")
         self.report = None
         self._build()
 
@@ -23,9 +30,22 @@ class PumpEnergyApp(tk.Tk):
         ttk.Label(heading, text="PUMP ENERGY SOLVER", font=("Segoe UI", 19, "bold")).pack(anchor="w")
         ttk.Label(heading, text=f"Developed by {AUTHOR}  |  Full mechanical energy equation", font=("Segoe UI", 10)).pack(anchor="w")
 
+        fluid_frame = ttk.LabelFrame(self, text="Fluid properties (automatic density)", padding=10)
+        fluid_frame.pack(fill="x", padx=16, pady=5)
+        ttk.Label(fluid_frame, text="Fluid").grid(row=0, column=0, padx=5)
+        ttk.Combobox(fluid_frame, textvariable=self.fluid, values=["freshwater", "seawater"], state="readonly", width=13).grid(row=0, column=1, padx=5)
+        ttk.Label(fluid_frame, text="Temperature [°C]").grid(row=0, column=2, padx=5)
+        ttk.Entry(fluid_frame, textvariable=self.temperature, width=10).grid(row=0, column=3, padx=5)
+        ttk.Label(fluid_frame, text="EC [mS/cm] (in-situ)").grid(row=0, column=4, padx=5)
+        self.ec_entry = ttk.Entry(fluid_frame, textvariable=self.ec, width=10)
+        self.ec_entry.grid(row=0, column=5, padx=5)
+        ttk.Label(fluid_frame, text="Pressure unit").grid(row=0, column=6, padx=5)
+        ttk.Combobox(fluid_frame, textvariable=self.pressure_unit, values=list(PRESSURE_TO_KPA), state="readonly", width=8).grid(row=0, column=7, padx=5)
+        self.fluid.trace_add("write", lambda *_: self.ec_entry.configure(state="normal" if self.fluid.get() == "seawater" else "disabled"))
+
         frame = ttk.LabelFrame(self, text="Known parameters (leave unknown fields blank)", padding=12)
         frame.pack(fill="x", padx=16, pady=5)
-        keys = list(FIELDS)
+        keys = [key for key in FIELDS if key != "rho"]
         for index, key in enumerate(keys):
             title, unit = FIELDS[key]
             col = index // 8
@@ -34,7 +54,7 @@ class PumpEnergyApp(tk.Tk):
             ttk.Label(frame, text=f"{title} ({key})").grid(row=row, column=base, sticky="w", padx=(0, 7), pady=5)
             entry = ttk.Entry(frame, width=15)
             entry.grid(row=row, column=base + 1, sticky="ew", padx=(0, 4), pady=5)
-            ttk.Label(frame, text=unit).grid(row=row, column=base + 2, sticky="w", padx=(0, 20), pady=5)
+            ttk.Label(frame, text=unit if key not in PRESSURE_KEYS else "selected").grid(row=row, column=base + 2, sticky="w", padx=(0, 20), pady=5)
             self.entries[key] = entry
         for c in (1, 4):
             frame.columnconfigure(c, weight=1)
@@ -102,22 +122,58 @@ class PumpEnergyApp(tk.Tk):
         if not inputs:
             messagebox.showinfo("No inputs", "Enter at least one known parameter.")
             return
+        try:
+            t = float(self.temperature.get())
+            if not math.isfinite(t):
+                raise ValueError("Temperature must be finite")
+            kwargs = {"temperature_C": t, "water_type": self.fluid.get(), "pressure_MPa_abs": 0.101325}
+            if self.fluid.get() == "seawater":
+                ec = float(self.ec.get())
+                if not math.isfinite(ec) or ec <= 0:
+                    raise ValueError("Seawater EC must be positive and finite")
+                kwargs.update(EC_value=ec, EC_unit="mS/cm", conductivity_temperature_mode="in_situ")
+            props = calculate_water_properties(**kwargs)
+            inputs["rho"] = props["density_kg_m3"]
+        except (ValueError, ImportError, ArithmeticError, NotImplementedError) as exc:
+            messagebox.showerror("Fluid properties", str(exc))
+            return
+        selected_unit = self.pressure_unit.get()
+        for pressure_key in PRESSURE_KEYS:
+            if pressure_key in inputs:
+                inputs[pressure_key] *= PRESSURE_TO_KPA[selected_unit]
         values, sources, errors = solve(inputs)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lines = [
             "PUMP ENERGY SOLVER", f"Developed by {AUTHOR}",
             f"Generated: {timestamp}", "=" * 82,
+            f"Fluid: {self.fluid.get()}",
+            f"Temperature: {self.temperature.get()} °C",
+            f"Density (calculated): {props['density_kg_m3']:.4f} kg/m3",
+            f"Density method: {props['method']}",
+            f"Pressure unit: {selected_unit}",
             "KNOWN INPUTS",
         ]
         for key, value in inputs.items():
-            label, unit = FIELDS[key]
-            lines.append(f"{label:36} {value:>14.8g} {unit}")
+            if key == "rho":
+                continue
+            label, display_unit = FIELDS[key]
+            if key in PRESSURE_KEYS:
+                value /= PRESSURE_TO_KPA[selected_unit]
+                display_unit = selected_unit
+            lines.append(f"{label:36} {value:>14.8g} {display_unit}")
         lines.extend(["", "RESULTS", "-" * 82])
-        for key, (label, unit) in FIELDS.items():
+        for key, (label, display_unit) in FIELDS.items():
+            if key == "rho":
+                continue
+            if key in PRESSURE_KEYS:
+                display_unit = selected_unit
             if key in values:
-                lines.append(f"{label:36} {values[key]:>14.8g} {unit:<7} [{sources[key]}]")
+                value = values[key]
+                if key in PRESSURE_KEYS:
+                    value /= PRESSURE_TO_KPA[selected_unit]
+                lines.append(f"{label:36} {value:>14.8g} {display_unit:<7} [{sources[key]}]")
             else:
-                lines.append(f"{label:36} {'Unknown':>14} {unit:<7} [INSUFFICIENT DATA]")
+                lines.append(f"{label:36} {'Unknown':>14} {display_unit:<7} [INSUFFICIENT DATA]")
         lines.extend(["", "DERIVED QUANTITIES"])
         if "Q" in values:
             lines.append(f"Flow rate (m3/s): {values['Q']/3600:.8g}")
@@ -128,6 +184,9 @@ class PumpEnergyApp(tk.Tk):
             lines.append(f"Pressure head (m): {values['dP']*1000/(values['rho']*G):.8g}")
         if all(k in values for k in ("V1", "V2")):
             lines.append(f"Velocity head change (m): {(values['V2']**2-values['V1']**2)/(2*G):.8g}")
+        if props.get("warnings"):
+            lines.extend(["", "FLUID MODEL NOTES"])
+            lines.extend("- " + warning for warning in props["warnings"])
         if errors:
             lines.extend(["", "WARNING: INCONSISTENT DATA"])
             lines.extend(f"- {error}" for error in errors)

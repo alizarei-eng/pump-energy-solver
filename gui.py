@@ -68,7 +68,7 @@ class PumpEnergyApp(tk.Tk):
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=16, pady=8)
         tab_names = ["Flow & Geometry", "Pressure & Elevation", "Fluid & Losses",
-                     "Pump Performance", "Pump Q-H Curve", "System Curve", "Results & Report"]
+                     "Pump Performance", "Pump Q-H Curve", "System H-Q Curve", "Results & Report"]
         self.tab_frames = {}
         for name in tab_names:
             tab = ttk.Frame(self.tabs, padding=16)
@@ -181,7 +181,7 @@ class PumpEnergyApp(tk.Tk):
         for _ in range(6):
             self.add_curve_row()
 
-        system_tab = self.tab_frames["System Curve"]
+        system_tab = self.tab_frames["System H-Q Curve"]
         ttk.Label(system_tab, text="System Curve | Multi-segment pipe and fitting losses",
                   font=("Segoe UI", 12, "bold")).pack(anchor="w")
         selectors = ttk.Frame(system_tab)

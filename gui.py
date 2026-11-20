@@ -32,7 +32,7 @@ class PumpEnergyApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("PUMP ENERGY SOLVER")
-        self.geometry("940x730")
+        self.geometry("1120x790")
         self.minsize(780, 580)
         self.entries = {}
         self.pipe_widgets = {}
@@ -201,7 +201,7 @@ class PumpEnergyApp(tk.Tk):
                  ("temp", "Water temperature", "30"),
                  ("ec", "In-situ EC (mS/cm)", "58"),
                  ("qmax", "Maximum flow", ""),
-                 ("points", "Plot points", "50"))
+)
         self.system_widgets, self.system_unit_labels = {}, {}
         for index, (key, label, default) in enumerate(specs):
             col = (index % 4) * 3
@@ -228,7 +228,7 @@ class PumpEnergyApp(tk.Tk):
         self.system_segment_selector.bind("<<ComboboxSelected>>", self._select_system_segment)
         self.system_segments_frame = ttk.Frame(pipe_box)
         self.system_segments_frame.pack(fill="x")
-        for col, name in enumerate(("Segment", "Material", "Length", "OD / bore", "SDR (PE)", "Roughness mm", "Fittings K")):
+        for col, name in enumerate(("Segment", "Material", "Length", "OD (PE) / ID (other)", "SDR (PE)", "Roughness mm", "Fittings K")):
             ttk.Label(self.system_segments_frame, text=name).grid(row=0, column=col, padx=4, pady=3)
 
         fitting_box = ttk.LabelFrame(system_tab, text="Fittings for selected segment", padding=5)
@@ -305,7 +305,7 @@ class PumpEnergyApp(tk.Tk):
         current = self.system_units.get()
         previous = getattr(self, "_system_previous_units", current)
         if previous != current:
-            for key in ("dz", "dp", "equipment", "qmax"):
+            for key in ("dz", "dp", "qmax"):
                 var = self.system_vars[key]
                 try:
                     val = float(var.get()) / self._system_factor(key, previous == "US")
@@ -423,7 +423,10 @@ class PumpEnergyApp(tk.Tk):
         details = []
         ktotal = 0.0
         for j, var in enumerate(data["fittings"]):
-            count = int(var.get())
+            try:
+                count = int(var.get())
+            except ValueError:
+                count = 0
             if count:
                 name, coefficient = FITTING_CATALOG[j]
                 details.append(f"{name} x{count}")
@@ -487,9 +490,9 @@ class PumpEnergyApp(tk.Tk):
             t = number(self.system_vars["temp"], "Temperature")
             temp = (t - 32)*5/9 if us else t
             qmax = number(self.system_vars["qmax"], "Maximum flow") * (0.22712470704 if us else 1)
-            n = number(self.system_vars["points"], "Plot points")
-            if qmax <= 0 or n != int(n) or not 2 <= n <= 500:
-                raise ValueError("Maximum flow > 0 and plot points 2..500 required.")
+            n = 50  # Fixed plotting resolution
+            if qmax <= 0:
+                raise ValueError("Maximum flow must be positive.")
             fluid = self.system_fluid.get()
             ec = number(self.system_vars["ec"], "EC") if fluid == "seawater" else None
             props = calculate_water_properties(temperature_C=temp, water_type=fluid,
@@ -503,9 +506,11 @@ class PumpEnergyApp(tk.Tk):
                 length = number(data["length"], f"Segment {index} length") * (0.3048 if us else 1)
                 od = number(data["od"], f"Segment {index} diameter") * (25.4 if us else 1)
                 sdr = number(data["sdr"], f"Segment {index} SDR") if material == "HDPE / PE" else None
+                if sdr is not None and sdr <= 2:
+                    raise ValueError(f"Segment {index} SDR must be greater than 2.")
                 diameter = od * (1 - 2/sdr) if sdr is not None else od
                 roughness = number(data["roughness"], f"Segment {index} roughness")
-                if length < 0 or diameter <= 0 or roughness < 0 or (sdr is not None and sdr <= 2):
+                if length < 0 or diameter <= 0 or roughness < 0:
                     raise ValueError(f"Invalid geometry for segment {index}.")
                 fittings = []
                 for j, var in enumerate(data["fittings"]):

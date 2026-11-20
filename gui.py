@@ -378,6 +378,28 @@ class PumpEnergyApp(tk.Tk):
         self._update_system_fitting_summary()
         self.system_report = None
 
+    def remove_system_segment(self):
+        """Remove the selected segment and rebuild segment rows."""
+        index = self._selected_system_segment()
+        if index is None:
+            return
+        if len(self.system_segments) == 1:
+            messagebox.showwarning("System Curve", "At least one segment is required.")
+            return
+        removed = self.system_segments.pop(index)
+        for widget in removed["widgets"] + [removed["row_label"]]:
+            widget.destroy()
+        for row, segment in enumerate(self.system_segments, start=1):
+            segment["row_label"].configure(text=str(row))
+            segment["row_label"].grid(row=row, column=0)
+            for col, widget in enumerate(segment["widgets"], start=1):
+                widget.grid(row=row, column=col)
+        self.system_segment_selector.configure(
+            values=[str(i + 1) for i in range(len(self.system_segments))])
+        self.system_segment_selector.set(str(min(index, len(self.system_segments)-1) + 1))
+        self._update_system_fitting_summary()
+        self.system_report = None
+
     def _segment_material_changed(self, data):
         material = data["material"].get()
         data["roughness"].set(str(SYSTEM_ROUGHNESS_MM.get(material, 0.05)))

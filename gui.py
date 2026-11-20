@@ -8,6 +8,7 @@ from pump_energy import FIELDS, NONNEGATIVE, POSITIVE, G, solve
 from water_properties import calculate_water_properties
 from hydraulics.system_curve import calculate_system_curve as compute_system_curve
 from plotting.system_plot import build_system_figure
+from hydraulics.sensitivity import analyze_sensitivity
 PRESSURE_TO_KPA = {"bar": 100.0, "psi": 6.894757293168, "kPa": 1.0, "Pa": 0.001}
 PRESSURE_KEYS = {"P1", "P2", "dP"}
 
@@ -50,6 +51,7 @@ class PumpEnergyApp(tk.Tk):
         self.system_vars = {}
         self.system_canvas = None
         self.system_report = None
+        self.system_sensitivity_inputs = None
         self.system_segments = []
         self.system_selected_segment = tk.IntVar(value=0)
         self.system_units = tk.StringVar(value="SI")
@@ -253,6 +255,7 @@ class PumpEnergyApp(tk.Tk):
         plot_controls = ttk.Frame(system_tab)
         plot_controls.pack(fill="x", pady=5)
         ttk.Button(plot_controls, text="Calculate System Curve", command=self.calculate_system_curve).pack(side="left", padx=4)
+        ttk.Button(plot_controls, text="Sensitivity ±10%", command=self.show_system_sensitivity).pack(side="left", padx=4)
         ttk.Button(plot_controls, text="Export System TXT", command=self.export_system_txt).pack(side="left", padx=4)
         ttk.Button(plot_controls, text="Save Project", command=self.save_system_project).pack(side="left", padx=4)
         ttk.Button(plot_controls, text="Open Project", command=self.load_system_project).pack(side="left", padx=4)
@@ -635,6 +638,7 @@ class PumpEnergyApp(tk.Tk):
                    "Gradual transition K must be supplied by user; unselected changes omit transition loss.",
                    "For non-PE pipes, diameter input is the INTERNAL bore, not outside diameter.",
                    "Manufacturer fitting K and roughness should replace indicative reference values for final design."]
+        self.system_sensitivity_inputs = (segments, transition_losses, dz, dp, rho, nu, qmax)
         self.system_report = "\n".join(report) + "\n"
         qfactor = 4.402867539 if us else 1.0
         hfactor = 3.280839895 if us else 1.0
@@ -645,6 +649,46 @@ class PumpEnergyApp(tk.Tk):
                  f"System head: {heads[-1]*hfactor:.4f} {'ft' if us else 'm'}  |  "
                  f"Hydraulic power: {powers_kw[-1]:.4f} kW "
                  f"({powers_kw[-1]*1.34102209:.4f} hp)")
+
+    def show_system_sensitivity(self):
+        """Display relative ±10% system-head sensitivities at maximum flow."""
+        if self.system_sensitivity_inputs is None:
+            messagebox.showinfo("Sensitivity", "Calculate System Curve first.")
+            return
+        try:
+            result = analyze_sensitivity(*self.system_sensitivity_inputs)
+        except (ValueError, ArithmeticError, OverflowError) as exc:
+            messagebox.showerror("Sensitivity", str(exc))
+            return
+        window = tk.Toplevel(self)
+        window.title("System Head Sensitivity | +/-10%")
+        window.geometry("790x440")
+        body = ttk.Frame(window, padding=12)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=(
+            f"At Q = {result['flow_m3h']:.4f} m3/h | "
+            f"Baseline head = {result['baseline_head_m']:.4f} m"),
+            font=("TkDefaultFont", 11, "bold")).pack(anchor="w", pady=(0, 10))
+        columns = ("parameter", "minus", "plus", "delta", "elasticity")
+        table = ttk.Treeview(body, columns=columns, show="headings", height=9)
+        headings = ("Parameter", "H at -10% (m)", "H at +10% (m)",
+                    "H(+10%) - H(-10%) (m)", "Relative sensitivity")
+        widths = (140, 125, 125, 190, 145)
+        for column, heading, width in zip(columns, headings, widths):
+            table.heading(column, text=heading)
+            table.column(column, width=width, anchor="center")
+        for row in result["results"]:
+            table.insert("", "end", values=(
+                row["parameter"], f"{row['head_minus_m']:.4f}",
+                f"{row['head_plus_m']:.4f}", f"{row['derivative_m']*0.2:.4f}",
+                f"{row['elasticity']:.4f}" if row["elasticity"] is not None else "N/A"))
+        table.pack(fill="both", expand=True)
+        ttk.Label(body, text=(
+            "Ranked by absolute head change. Each parameter is varied globally; "
+            "others stay fixed.\n"
+            "Diameter sensitivity assumes all segment internal diameters change together. "
+            "Fixed K values are approximate."),
+            wraplength=740, justify="left").pack(anchor="w", pady=(8, 0))
 
     def save_system_project(self):
         """Persist editable System Curve inputs, not calculated outputs."""

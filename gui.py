@@ -27,6 +27,8 @@ class PumpEnergyApp(tk.Tk):
         self.pipe_sdr = {}
         self.pipe_grade = {}
         self.curve_rows = []
+        self.curve_canvas = None
+        self.curve_figure = None
         self.fluid = tk.StringVar(value="seawater")
         self.temperature = tk.StringVar(value="30")
         self.ec = tk.StringVar(value="58")
@@ -137,8 +139,15 @@ class PumpEnergyApp(tk.Tk):
         ttk.Button(bar, text="Add row", command=self.add_curve_row).pack(side="left", padx=4)
         ttk.Button(bar, text="Remove last row", command=self.remove_curve_row).pack(side="left", padx=4)
         ttk.Button(bar, text="Clear table", command=self.clear_curve_rows).pack(side="left", padx=4)
-        self.curve_frame = ttk.LabelFrame(curve_tab, text="Flow - Head Table", padding=10)
-        self.curve_frame.pack(fill="both", expand=True, pady=10)
+        ttk.Button(bar, text="Calculate Q-H", command=self.calculate_curve).pack(side="left", padx=14)
+        content = ttk.Frame(curve_tab)
+        content.pack(fill="both", expand=True, pady=10)
+        self.curve_frame = ttk.LabelFrame(content, text="Flow - Head Table", padding=10)
+        self.curve_frame.pack(side="left", fill="y", padx=(0, 12))
+        self.curve_plot_frame = ttk.LabelFrame(content, text="Q-H Diagram", padding=8)
+        self.curve_plot_frame.pack(side="left", fill="both", expand=True)
+        self.curve_status = ttk.Label(curve_tab, text="Enter at least two Q-H points, then click Calculate Q-H.")
+        self.curve_status.pack(anchor="w")
         for column, label in enumerate(("Point", "Flow Q (m3/h)", "Head H (m)")):
             ttk.Label(self.curve_frame, text=label).grid(row=0, column=column, padx=12, pady=6)
         for _ in range(6):
@@ -174,6 +183,40 @@ class PumpEnergyApp(tk.Tk):
                       "Unknown values are not assumed to be zero.\n"
                       "Shaft power (Ps) is mechanical power, not electrical input power.")
 
+    def calculate_curve(self):
+        try:
+            points = self.read_curve()
+            if len(points) < 2:
+                raise ValueError("At least two complete Q-H points are required.")
+        except ValueError as exc:
+            messagebox.showerror("Pump Q-H curve", str(exc))
+            return
+        try:
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        except ImportError:
+            messagebox.showerror("Missing dependency", "Install matplotlib: python -m pip install matplotlib")
+            return
+        if self.curve_canvas is not None:
+            self.curve_canvas.get_tk_widget().destroy()
+            self.curve_canvas = None
+        if self.curve_figure is not None:
+            from matplotlib import pyplot as plt
+            plt.close(self.curve_figure)
+        self.curve_figure = Figure(figsize=(5.5, 4.0), dpi=100)
+        axis = self.curve_figure.add_subplot(111)
+        flows, heads = zip(*points)
+        axis.plot(flows, heads, marker="o", linewidth=1.8)
+        axis.set_xlabel("Flow rate Q (m3/h)")
+        axis.set_ylabel("Pump head H (m)")
+        axis.set_title("Pump Q-H characteristic")
+        axis.grid(True, alpha=0.35)
+        self.curve_figure.tight_layout()
+        self.curve_canvas = FigureCanvasTkAgg(self.curve_figure, master=self.curve_plot_frame)
+        self.curve_canvas.draw()
+        self.curve_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.curve_status.configure(text=f"Plotted {len(points)} points. Straight lines connect measured points; no extrapolation.")
+        
     def add_curve_row(self):
         index = len(self.curve_rows) + 1
         label = ttk.Label(self.curve_frame, text=str(index))
@@ -192,6 +235,10 @@ class PumpEnergyApp(tk.Tk):
         for _, q, h in self.curve_rows:
             q.delete(0, "end")
             h.delete(0, "end")
+        if self.curve_canvas is not None:
+            self.curve_canvas.get_tk_widget().destroy()
+            self.curve_canvas = None
+        self.curve_status.configure(text="Table cleared. Enter Q-H points and click Calculate Q-H.")
 
     def read_curve(self):
         points = []

@@ -9,6 +9,10 @@ PRESSURE_TO_KPA = {"bar": 100.0, "psi": 6.894757293168, "kPa": 1.0, "Pa": 0.001}
 PRESSURE_KEYS = {"P1", "P2", "dP"}
 
 AUTHOR = "Ali_zarei_eng"
+KW_PER_METRIC_HP = 0.73549875
+PE_MRS_MPA = {"PE80": 8.0, "PE100": 10.0, "PE100-RC": 10.0}
+SDR_OPTIONS = ("6", "7.4", "9", "11", "13.6", "17", "17.6", "21", "26", "33", "41")
+PIPE_TYPES = ("HDPE / PE", "PVC", "Steel", "Other")
 
 class PumpEnergyApp(tk.Tk):
     def __init__(self):
@@ -17,6 +21,11 @@ class PumpEnergyApp(tk.Tk):
         self.geometry("940x730")
         self.minsize(780, 580)
         self.entries = {}
+        self.pipe_widgets = {}
+        self.pipe_types = {}
+        self.pipe_od = {}
+        self.pipe_sdr = {}
+        self.pipe_grade = {}
         self.fluid = tk.StringVar(value="seawater")
         self.temperature = tk.StringVar(value="30")
         self.ec = tk.StringVar(value="58")
@@ -41,7 +50,7 @@ class PumpEnergyApp(tk.Tk):
             self.tab_frames[name] = tab
 
         groups = {
-            "Flow & Geometry": ["Q", "D1", "D2", "V1", "V2"],
+            "Flow & Geometry": ["Q", "V1", "V2"],
             "Pressure & Elevation": ["P1", "P2", "dP", "dz"],
             "Fluid & Losses": ["hL"],
             "Pump Performance": ["Hp", "eta", "Ph", "Ps"],
@@ -59,6 +68,41 @@ class PumpEnergyApp(tk.Tk):
                 ttk.Label(frame, text=unit if key not in PRESSURE_KEYS else "selected unit").grid(
                     row=row, column=2, sticky="w", padx=10, pady=7)
                 self.entries[key] = entry
+
+        geometry_tab = self.tab_frames["Flow & Geometry"]
+        for section, key in (("Inlet", "D1"), ("Outlet", "D2")):
+            pipe_frame = ttk.LabelFrame(geometry_tab, text=f"{section} pipe geometry", padding=10)
+            pipe_frame.pack(fill="x", pady=7)
+            pipe_type = tk.StringVar(value="HDPE / PE")
+            od = tk.StringVar()
+            sdr = tk.StringVar(value="11")
+            grade = tk.StringVar(value="PE100")
+            self.pipe_types[key] = pipe_type
+            self.pipe_od[key] = od
+            self.pipe_sdr[key] = sdr
+            self.pipe_grade[key] = grade
+            ttk.Label(pipe_frame, text="Pipe material").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+            ttk.Combobox(pipe_frame, textvariable=pipe_type, values=PIPE_TYPES,
+                         state="readonly", width=14).grid(row=0, column=1, padx=5, pady=5)
+            ttk.Label(pipe_frame, text="Outside diameter [mm]").grid(row=0, column=2, padx=5)
+            od_entry = ttk.Entry(pipe_frame, textvariable=od, width=10)
+            od_entry.grid(row=0, column=3, padx=5)
+            ttk.Label(pipe_frame, text="SDR").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+            sdr_entry = ttk.Combobox(pipe_frame, textvariable=sdr, values=SDR_OPTIONS, width=11)
+            sdr_entry.grid(row=1, column=1, padx=5, pady=5)
+            ttk.Label(pipe_frame, text="PE grade").grid(row=1, column=2, padx=5)
+            grade_entry = ttk.Combobox(pipe_frame, textvariable=grade, values=list(PE_MRS_MPA),
+                                       state="readonly", width=11)
+            grade_entry.grid(row=1, column=3, padx=5)
+            ttk.Label(pipe_frame, text="Inside diameter [mm]").grid(row=2, column=0, sticky="w", padx=5, pady=5)
+            id_entry = ttk.Entry(pipe_frame, width=10)
+            id_entry.grid(row=2, column=1, padx=5, pady=5)
+            self.entries[key] = id_entry
+            ttk.Label(pipe_frame, text="For non-PE pipes, enter the measured ID.").grid(
+                row=2, column=2, columnspan=2, sticky="w", padx=5)
+            self.pipe_widgets[key] = (od_entry, sdr_entry, grade_entry, id_entry)
+            pipe_type.trace_add("write", lambda *_args, k=key: self._toggle_pipe(k))
+            self._toggle_pipe(key)
 
         pressure_tab = self.tab_frames["Pressure & Elevation"]
         pressure_settings = ttk.LabelFrame(pressure_tab, text="Pressure units", padding=12)
@@ -114,6 +158,46 @@ class PumpEnergyApp(tk.Tk):
                       "Unknown values are not assumed to be zero.\n"
                       "Shaft power (Ps) is mechanical power, not electrical input power.")
 
+    def _toggle_pipe(self, key):
+        od, sdr, grade, inner = self.pipe_widgets[key]
+        pe = self.pipe_types[key].get() == "HDPE / PE"
+        for widget in (od, sdr):
+            widget.configure(state="normal" if pe else "disabled")
+        grade.configure(state="readonly" if pe else "disabled")
+        inner.configure(state="disabled" if pe else "normal")
+
+    def _pipe_inputs(self, inputs):
+        """Compute nominal PE bore and indicative 20 C pressure; not a certified PN."""
+        notes = []
+        for key in ("D1", "D2"):
+            material = self.pipe_types[key].get()
+            side = "Inlet" if key == "D1" else "Outlet"
+            if material != "HDPE / PE":
+                if key in inputs:
+                    notes.append(f"{side}: {material}, specified inside diameter = {inputs[key]:.4f} mm")
+                else:
+                    notes.append(f"{side}: {material}, inside diameter unknown")
+                continue
+            od_text = self.pipe_od[key].get().strip()
+            if not od_text:
+                notes.append(f"{side}: PE diameter not specified")
+                continue
+            od = float(od_text)
+            sdr = float(self.pipe_sdr[key].get())
+            if not (math.isfinite(od) and od > 0 and math.isfinite(sdr) and sdr > 2):
+                raise ValueError(f"{side}: OD must be positive and SDR must exceed 2.")
+            inner = od * (1 - 2 / sdr)
+            grade = self.pipe_grade[key].get()
+            mrs = PE_MRS_MPA[grade]
+            reference_bar = 20 * (mrs / 1.25) / (sdr - 1)
+            inputs[key] = inner
+            notes.append(
+                f"{side}: PE {grade}, OD={od:g} mm, SDR={sdr:g}, "
+                f"nominal wall={od/sdr:.3f} mm, calculated ID={inner:.3f} mm; "
+                f"reference pressure={reference_bar:.2f} bar (20 C, C=1.25; NOT certified PN)"
+            )
+        return notes
+
     def _display(self, text):
         self.output.configure(state="normal")
         self.output.delete("1.0", "end")
@@ -129,6 +213,10 @@ class PumpEnergyApp(tk.Tk):
     def clear_inputs(self):
         for entry in self.entries.values():
             entry.delete(0, "end")
+        for key in ("D1", "D2"):
+            self.pipe_od[key].set("")
+            self.pipe_sdr[key].set("11")
+            self.pipe_grade[key].set("PE100")
         self.clear_results()
 
     def calculate(self):
@@ -152,6 +240,12 @@ class PumpEnergyApp(tk.Tk):
                 entry.focus_set()
                 return
             inputs[key] = value
+        try:
+            pipe_notes = self._pipe_inputs(inputs)
+        except (ValueError, KeyError) as exc:
+            messagebox.showerror("Pipe geometry", str(exc))
+            self.tabs.select(self.tab_frames["Flow & Geometry"])
+            return
         if not inputs:
             messagebox.showinfo("No inputs", "Enter at least one known parameter.")
             return
@@ -194,6 +288,8 @@ class PumpEnergyApp(tk.Tk):
                 value /= PRESSURE_TO_KPA[selected_unit]
                 display_unit = selected_unit
             lines.append(f"{label:36} {value:>14.8g} {display_unit}")
+        lines.extend(["", "PIPE GEOMETRY AND REFERENCE PRESSURE"])
+        lines.extend(pipe_notes)
         lines.extend(["", "RESULTS", "-" * 82])
         for key, (label, display_unit) in FIELDS.items():
             if key == "rho":
@@ -207,6 +303,12 @@ class PumpEnergyApp(tk.Tk):
                 lines.append(f"{label:36} {value:>14.8g} {display_unit:<7} [{sources[key]}]")
             else:
                 lines.append(f"{label:36} {'Unknown':>14} {display_unit:<7} [INSUFFICIENT DATA]")
+        lines.extend(["", "POWER IN METRIC HORSEPOWER (PS / cv)"])
+        for key, title in (("Ph", "Hydraulic power"), ("Ps", "Shaft power")):
+            if key in values:
+                lines.append(f"{title}: {values[key]/KW_PER_METRIC_HP:.5f} PS (metric hp)")
+            else:
+                lines.append(f"{title}: Unknown")
         lines.extend(["", "DERIVED QUANTITIES"])
         if "Q" in values:
             lines.append(f"Flow rate (m3/s): {values['Q']/3600:.8g}")
@@ -230,9 +332,21 @@ class PumpEnergyApp(tk.Tk):
                       "Steady incompressible flow; kinetic correction factors = 1.",
                       "Input zero explicitly when elevation difference or head loss is known zero.",
                       "Ps is shaft power, not electric input power.",
+                      "1 metric horsepower (PS) = 0.73549875 kW.",
+                      "PE reference pressure assumes 20 C and design coefficient C=1.25.",
+                      "Check certified PN, temperature derating and manufacturer datasheet.",
+                      "PE inside diameter is nominal; manufacturing tolerances apply.",
                       "Validate calculations against pump curves and field measurements."])
         self.report = "\n".join(lines) + "\n"
         self._display(self.report)
+        def metric(key, unit):
+            return f"{values[key]:.4g} {unit}" if key in values else "Unknown"
+        horsepower = f"{values['Ps']/KW_PER_METRIC_HP:.3g} PS" if "Ps" in values else "Unknown"
+        self.summary_label.configure(text=(
+            f"Q: {metric('Q', 'm3/h')}    Hp: {metric('Hp', 'm')}    "
+            f"Ph: {metric('Ph', 'kW')}    Ps: {metric('Ps', 'kW')} / {horsepower}"
+        ))
+        self.tabs.select(self.tab_frames["Results & Report"])
         self.export_button.configure(state="normal")
 
     def export_txt(self):

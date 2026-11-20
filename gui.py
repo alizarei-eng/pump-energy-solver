@@ -612,6 +612,7 @@ class PumpEnergyApp(tk.Tk):
                     total_loss += k_transition*ref_v**2/(2*G)
             heads.append(static_head+total_loss)
             segment_results.append(per_segment)
+        powers_kw = [rho * G * (q / 3600) * h / 1000 for q, h in zip(flows, heads)]
         if self.system_canvas is not None:
             self.system_canvas.get_tk_widget().destroy()
         fig = Figure(figsize=(5.2, 3.2), dpi=100)
@@ -637,6 +638,7 @@ class PumpEnergyApp(tk.Tk):
                   f"Elevation: {dz:.7g} m | Pressure difference: {dp:.7g} kPa",
                   f"Static head: {static_head:.7g} m",
                   f"Maximum flow: {qmax:.7g} m3/h | Plot points: {int(n)}",
+                  f"At maximum flow: H={heads[-1]:.7g} m | Hydraulic power={powers_kw[-1]:.7g} kW",
                   "Fitting K values from pipe-pressure-loss-calculator/databases/fittings.json (indicative)."]
         for seg in segments:
             report += [f"", f"SEGMENT {seg['index']}",
@@ -652,10 +654,10 @@ class PumpEnergyApp(tk.Tk):
         report += ["", "DIAMETER TRANSITIONS (between adjacent segments)"]
         report += [f"{j+1} -> {j+2}: {kind}; K={k:.7g}; reference={'upstream' if ref == 1.0 else 'downstream' if ref == 2.0 else 'none'}"
                    for j, (kind, k, ref) in enumerate(transition_losses)]
-        report += ["", "FLOW TABLE (SI)", "Q [m3/h] | Total head [m] | Segment | Velocity [m/s] | Re | Darcy f | Major [m] | Minor [m]"]
-        for q,h,per in zip(flows,heads,segment_results):
+        report += ["", "FLOW TABLE (SI)", "Q [m3/h] | Total head [m] | Hydraulic power [kW] | Segment | Velocity [m/s] | Re | Darcy f | Major [m] | Minor [m]"]
+        for q,h,power,per in zip(flows,heads,powers_kw,segment_results):
             for seg, (v,re,f,major,minor) in zip(segments,per):
-                report.append(f"{q:.8g} | {h:.8g} | {seg['index']} | {v:.8g} | {re:.8g} | {f:.8g} | {major:.8g} | {minor:.8g}")
+                report.append(f"{q:.8g} | {h:.8g} | {power:.8g} | {seg['index']} | {v:.8g} | {re:.8g} | {f:.8g} | {major:.8g} | {minor:.8g}")
         report += ["", "Water property warnings:"] + [str(x) for x in props.get("warnings", [])]
         report += ["Water property assumptions:"] + [str(x) for x in props.get("assumptions", [])]
         report += ["Assumptions: series pipe, constant flow through segments, no branches.",
@@ -665,7 +667,8 @@ class PumpEnergyApp(tk.Tk):
                    "Manufacturer fitting K and roughness should replace indicative reference values for final design."]
         self.system_report = "\n".join(report) + "\n"
         self.system_status.configure(text=f"{len(segments)} segments | rho={rho:.2f} kg/m3 | "
-            f"H(max Q)={heads[-1]*hfactor:.2f} {'ft' if us else 'm'}")
+            f"H(max Q)={heads[-1]*hfactor:.2f} {'ft' if us else 'm'} | "
+            f"Hydraulic power={powers_kw[-1]:.2f} kW ({powers_kw[-1]*1.34102209:.2f} hp)")
 
     def save_system_project(self):
         """Persist editable System Curve inputs, not calculated outputs."""

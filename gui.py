@@ -471,7 +471,14 @@ class PumpEnergyApp(tk.Tk):
         try:
             us = self.system_units.get() == "US"
             def number(var, label):
-                value = float(var.get())
+                raw = var.get().strip().replace("٫", ".").replace("−", "-").replace("،", ".")
+                raw = raw.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+                if not raw:
+                    raise ValueError(f"{label} is empty. Please enter a number.")
+                try:
+                    value = float(raw)
+                except ValueError:
+                    raise ValueError(f"{label} must be numeric (received: {var.get()!r}).") from None
                 if not math.isfinite(value):
                     raise ValueError(f"{label} must be finite.")
                 return value

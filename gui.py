@@ -14,8 +14,8 @@ class PumpEnergyApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("PUMP ENERGY SOLVER")
-        self.geometry("1200x820")
-        self.minsize(1000, 650)
+        self.geometry("940x730")
+        self.minsize(780, 580)
         self.entries = {}
         self.fluid = tk.StringVar(value="seawater")
         self.temperature = tk.StringVar(value="30")
@@ -30,34 +30,59 @@ class PumpEnergyApp(tk.Tk):
         ttk.Label(heading, text="PUMP ENERGY SOLVER", font=("Segoe UI", 19, "bold")).pack(anchor="w")
         ttk.Label(heading, text=f"Developed by {AUTHOR}  |  Full mechanical energy equation", font=("Segoe UI", 10)).pack(anchor="w")
 
-        fluid_frame = ttk.LabelFrame(self, text="Fluid properties (automatic density)", padding=10)
-        fluid_frame.pack(fill="x", padx=16, pady=5)
-        ttk.Label(fluid_frame, text="Fluid").grid(row=0, column=0, padx=5)
-        ttk.Combobox(fluid_frame, textvariable=self.fluid, values=["freshwater", "seawater"], state="readonly", width=13).grid(row=0, column=1, padx=5)
-        ttk.Label(fluid_frame, text="Temperature [°C]").grid(row=0, column=2, padx=5)
-        ttk.Entry(fluid_frame, textvariable=self.temperature, width=10).grid(row=0, column=3, padx=5)
-        ttk.Label(fluid_frame, text="EC [mS/cm] (in-situ)").grid(row=0, column=4, padx=5)
-        self.ec_entry = ttk.Entry(fluid_frame, textvariable=self.ec, width=10)
-        self.ec_entry.grid(row=0, column=5, padx=5)
-        ttk.Label(fluid_frame, text="Pressure unit").grid(row=0, column=6, padx=5)
-        ttk.Combobox(fluid_frame, textvariable=self.pressure_unit, values=list(PRESSURE_TO_KPA), state="readonly", width=8).grid(row=0, column=7, padx=5)
-        self.fluid.trace_add("write", lambda *_: self.ec_entry.configure(state="normal" if self.fluid.get() == "seawater" else "disabled"))
+        self.tabs = ttk.Notebook(self)
+        self.tabs.pack(fill="both", expand=True, padx=16, pady=8)
+        tab_names = ["Flow & Geometry", "Pressure & Elevation", "Fluid & Losses",
+                     "Pump Performance", "Results & Report"]
+        self.tab_frames = {}
+        for name in tab_names:
+            tab = ttk.Frame(self.tabs, padding=16)
+            self.tabs.add(tab, text=name)
+            self.tab_frames[name] = tab
 
-        frame = ttk.LabelFrame(self, text="Known parameters (leave unknown fields blank)", padding=12)
-        frame.pack(fill="x", padx=16, pady=5)
-        keys = [key for key in FIELDS if key != "rho"]
-        for index, key in enumerate(keys):
-            title, unit = FIELDS[key]
-            col = index // 8
-            row = index % 8
-            base = col * 3
-            ttk.Label(frame, text=f"{title} ({key})").grid(row=row, column=base, sticky="w", padx=(0, 7), pady=5)
-            entry = ttk.Entry(frame, width=9)
-            entry.grid(row=row, column=base + 1, sticky="ew", padx=(0, 4), pady=5)
-            ttk.Label(frame, text=unit if key not in PRESSURE_KEYS else "selected").grid(row=row, column=base + 2, sticky="w", padx=(0, 20), pady=5)
-            self.entries[key] = entry
-        for c in (1, 4):
-            frame.columnconfigure(c, weight=0)
+        groups = {
+            "Flow & Geometry": ["Q", "D1", "D2", "V1", "V2"],
+            "Pressure & Elevation": ["P1", "P2", "dP", "dz"],
+            "Fluid & Losses": ["hL"],
+            "Pump Performance": ["Hp", "eta", "Ph", "Ps"],
+        }
+        for tab_name, keys in groups.items():
+            frame = ttk.LabelFrame(self.tab_frames[tab_name],
+                                   text="Known parameters (leave unknown values blank)", padding=14)
+            frame.pack(anchor="nw", fill="x")
+            for row, key in enumerate(keys):
+                title, unit = FIELDS[key]
+                ttk.Label(frame, text=f"{title} ({key})").grid(
+                    row=row, column=0, sticky="w", padx=(0, 12), pady=7)
+                entry = ttk.Entry(frame, width=10)
+                entry.grid(row=row, column=1, sticky="w", pady=7)
+                ttk.Label(frame, text=unit if key not in PRESSURE_KEYS else "selected unit").grid(
+                    row=row, column=2, sticky="w", padx=10, pady=7)
+                self.entries[key] = entry
+
+        pressure_tab = self.tab_frames["Pressure & Elevation"]
+        pressure_settings = ttk.LabelFrame(pressure_tab, text="Pressure units", padding=12)
+        pressure_settings.pack(fill="x", pady=12)
+        ttk.Label(pressure_settings, text="Pressure unit").pack(side="left", padx=(0, 10))
+        ttk.Combobox(pressure_settings, textvariable=self.pressure_unit,
+                     values=list(PRESSURE_TO_KPA), state="readonly", width=8).pack(side="left")
+        ttk.Label(pressure_settings, text="Applies to P1, P2 and dP.").pack(side="left", padx=14)
+
+        fluid_tab = self.tab_frames["Fluid & Losses"]
+        fluid_frame = ttk.LabelFrame(fluid_tab, text="Fluid properties (automatic density)", padding=12)
+        fluid_frame.pack(fill="x", pady=12)
+        ttk.Label(fluid_frame, text="Fluid").grid(row=0, column=0, sticky="w", pady=7)
+        ttk.Combobox(fluid_frame, textvariable=self.fluid,
+                     values=["freshwater", "seawater"], state="readonly", width=14).grid(
+                         row=0, column=1, sticky="w", padx=12, pady=7)
+        ttk.Label(fluid_frame, text="Temperature [°C]").grid(row=1, column=0, sticky="w", pady=7)
+        ttk.Entry(fluid_frame, textvariable=self.temperature, width=10).grid(
+            row=1, column=1, sticky="w", padx=12, pady=7)
+        ttk.Label(fluid_frame, text="EC [mS/cm] (in-situ)").grid(row=2, column=0, sticky="w", pady=7)
+        self.ec_entry = ttk.Entry(fluid_frame, textvariable=self.ec, width=10)
+        self.ec_entry.grid(row=2, column=1, sticky="w", padx=12, pady=7)
+        self.fluid.trace_add("write", lambda *_: self.ec_entry.configure(
+            state="normal" if self.fluid.get() == "seawater" else "disabled"))
 
         controls = ttk.Frame(self, padding=(16, 8))
         controls.pack(fill="x")
@@ -67,8 +92,15 @@ class PumpEnergyApp(tk.Tk):
         self.export_button = ttk.Button(controls, text="Export TXT", command=self.export_txt, state="disabled")
         self.export_button.pack(side="left")
 
-        output_frame = ttk.LabelFrame(self, text="Calculation results", padding=8)
-        output_frame.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+        output_frame = ttk.LabelFrame(self.tab_frames["Results & Report"],
+                                      text="Detailed calculation results", padding=8)
+        output_frame.pack(fill="both", expand=True)
+        summary = ttk.LabelFrame(self.tab_frames["Results & Report"],
+                                 text="Calculation summary", padding=8)
+        summary.pack(fill="x", before=output_frame, pady=(0, 8))
+        self.summary_label = ttk.Label(summary, text="Calculate to display pump performance.",
+                                       font=("Segoe UI", 10))
+        self.summary_label.pack(anchor="w")
         self.output = tk.Text(output_frame, wrap="none", font=("Consolas", 10), height=17)
         self.output.grid(row=0, column=0, sticky="nsew")
         sy = ttk.Scrollbar(output_frame, orient="vertical", command=self.output.yview)
@@ -91,7 +123,7 @@ class PumpEnergyApp(tk.Tk):
     def clear_results(self):
         self.report = None
         self.export_button.configure(state="disabled")
-        self._display("Results cleared.")
+        self._display("Results cleared.")\n        self.summary_label.configure(text="Calculate to display pump performance.")
 
     def clear_inputs(self):
         for entry in self.entries.values():

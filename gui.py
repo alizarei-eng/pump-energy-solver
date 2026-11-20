@@ -26,6 +26,7 @@ class PumpEnergyApp(tk.Tk):
         self.pipe_od = {}
         self.pipe_sdr = {}
         self.pipe_grade = {}
+        self.pipe_result_labels = {}
         self.curve_rows = []
         self.curve_canvas = None
         self.curve_figure = None
@@ -106,6 +107,11 @@ class PumpEnergyApp(tk.Tk):
             self.pipe_widgets[key] = (od_entry, sdr_entry, grade_entry, id_entry)
             pipe_type.trace_add("write", lambda *_args, k=key: self._toggle_pipe(k))
             self._toggle_pipe(key)
+            ttk.Button(pipe_frame, text="Calculate", command=lambda k=key: self.calculate_pipe(k)).grid(
+                row=3, column=0, padx=5, pady=7, sticky="w")
+            result = ttk.Label(pipe_frame, text="Enter OD and SDR, then calculate.", wraplength=610)
+            result.grid(row=3, column=1, columnspan=3, padx=5, pady=7, sticky="w")
+            self.pipe_result_labels[key] = result
 
         pressure_tab = self.tab_frames["Pressure & Elevation"]
         pressure_settings = ttk.LabelFrame(pressure_tab, text="Pressure units", padding=12)
@@ -258,6 +264,36 @@ class PumpEnergyApp(tk.Tk):
         if len(set(q for q, _ in points)) != len(points):
             raise ValueError("Duplicate Q values in pump curve.")
         return sorted(points)
+
+    def calculate_pipe(self, key):
+        side = "Inlet" if key == "D1" else "Outlet"
+        if self.pipe_types[key].get() != "HDPE / PE":
+            raw = self.entries[key].get().strip()
+            try:
+                diameter = float(raw)
+                if not math.isfinite(diameter) or diameter <= 0:
+                    raise ValueError()
+            except ValueError:
+                messagebox.showerror("Pipe geometry", f"{side}: enter a positive inside diameter.")
+                return
+            self.pipe_result_labels[key].configure(text=f"{side} | Inside diameter: {diameter:.2f} mm")
+            return
+        try:
+            od = float(self.pipe_od[key].get())
+            sdr = float(self.pipe_sdr[key].get())
+            if not (math.isfinite(od) and math.isfinite(sdr) and od > 0 and sdr > 2):
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("Pipe geometry", f"{side}: enter positive OD and SDR greater than 2.")
+            return
+        thickness = od / sdr
+        inner = od - 2 * thickness
+        grade = self.pipe_grade[key].get()
+        pressure_bar = 20 * (PE_MRS_MPA[grade] / 1.25) / (sdr - 1)
+        self.pipe_result_labels[key].configure(text=(
+            f"Wall: {thickness:.2f} mm | ID: {inner:.2f} mm | "
+            f"Reference pressure: {pressure_bar:.2f} bar (20 C, C=1.25)"
+        ))
 
     def _toggle_pipe(self, key):
         od, sdr, grade, inner = self.pipe_widgets[key]

@@ -26,6 +26,7 @@ class PumpEnergyApp(tk.Tk):
         self.pipe_od = {}
         self.pipe_sdr = {}
         self.pipe_grade = {}
+        self.curve_rows = []
         self.fluid = tk.StringVar(value="seawater")
         self.temperature = tk.StringVar(value="30")
         self.ec = tk.StringVar(value="58")
@@ -42,7 +43,7 @@ class PumpEnergyApp(tk.Tk):
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=16, pady=8)
         tab_names = ["Flow & Geometry", "Pressure & Elevation", "Fluid & Losses",
-                     "Pump Performance", "Results & Report"]
+                     "Pump Performance", "Pump Q-H Curve", "Results & Report"]
         self.tab_frames = {}
         for name in tab_names:
             tab = ttk.Frame(self.tabs, padding=16)
@@ -128,6 +129,21 @@ class PumpEnergyApp(tk.Tk):
         self.fluid.trace_add("write", lambda *_: self.ec_entry.configure(
             state="normal" if self.fluid.get() == "seawater" else "disabled"))
 
+        curve_tab = self.tab_frames["Pump Q-H Curve"]
+        ttk.Label(curve_tab, text="Pump Q-H characteristic points", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(curve_tab, text="Enter catalog or measured flow and head pairs. Units: m3/h and m.").pack(anchor="w", pady=8)
+        bar = ttk.Frame(curve_tab)
+        bar.pack(fill="x")
+        ttk.Button(bar, text="Add row", command=self.add_curve_row).pack(side="left", padx=4)
+        ttk.Button(bar, text="Remove last row", command=self.remove_curve_row).pack(side="left", padx=4)
+        ttk.Button(bar, text="Clear table", command=self.clear_curve_rows).pack(side="left", padx=4)
+        self.curve_frame = ttk.LabelFrame(curve_tab, text="Flow - Head Table", padding=10)
+        self.curve_frame.pack(fill="both", expand=True, pady=10)
+        for column, label in enumerate(("Point", "Flow Q (m3/h)", "Head H (m)")):
+            ttk.Label(self.curve_frame, text=label).grid(row=0, column=column, padx=12, pady=6)
+        for _ in range(6):
+            self.add_curve_row()
+
         controls = ttk.Frame(self, padding=(16, 8))
         controls.pack(fill="x")
         ttk.Button(controls, text="Calculate", command=self.calculate).pack(side="left", padx=(0, 8))
@@ -157,6 +173,44 @@ class PumpEnergyApp(tk.Tk):
         self._display("Enter only the values you know, then click Calculate.\n"
                       "Unknown values are not assumed to be zero.\n"
                       "Shaft power (Ps) is mechanical power, not electrical input power.")
+
+    def add_curve_row(self):
+        index = len(self.curve_rows) + 1
+        label = ttk.Label(self.curve_frame, text=str(index))
+        q = ttk.Entry(self.curve_frame, width=12)
+        h = ttk.Entry(self.curve_frame, width=12)
+        for column, widget in enumerate((label, q, h)):
+            widget.grid(row=index, column=column, padx=12, pady=4, sticky="w")
+        self.curve_rows.append((label, q, h))
+
+    def remove_curve_row(self):
+        if self.curve_rows:
+            for widget in self.curve_rows.pop():
+                widget.destroy()
+
+    def clear_curve_rows(self):
+        for _, q, h in self.curve_rows:
+            q.delete(0, "end")
+            h.delete(0, "end")
+
+    def read_curve(self):
+        points = []
+        for index, (_, q_entry, h_entry) in enumerate(self.curve_rows, 1):
+            q_text, h_text = q_entry.get().strip(), h_entry.get().strip()
+            if not q_text and not h_text:
+                continue
+            if not q_text or not h_text:
+                raise ValueError(f"Row {index}: enter both Q and H.")
+            try:
+                q, h = float(q_text), float(h_text)
+            except ValueError:
+                raise ValueError(f"Row {index}: invalid number.") from None
+            if not all(math.isfinite(v) for v in (q, h)) or q < 0 or h < 0:
+                raise ValueError(f"Row {index}: Q and H must be finite and nonnegative.")
+            points.append((q, h))
+        if len(set(q for q, _ in points)) != len(points):
+            raise ValueError("Duplicate Q values in pump curve.")
+        return sorted(points)
 
     def _toggle_pipe(self, key):
         od, sdr, grade, inner = self.pipe_widgets[key]
@@ -217,9 +271,16 @@ class PumpEnergyApp(tk.Tk):
             self.pipe_od[key].set("")
             self.pipe_sdr[key].set("11")
             self.pipe_grade[key].set("PE100")
+        self.clear_curve_rows()
         self.clear_results()
 
     def calculate(self):
+        try:
+            curve_points = self.read_curve()
+        except ValueError as exc:
+            messagebox.showerror("Pump Q-H curve", str(exc))
+            self.tabs.select(self.tab_frames["Pump Q-H Curve"])
+            return
         inputs = {}
         for key, entry in self.entries.items():
             raw = entry.get().strip()
@@ -288,6 +349,14 @@ class PumpEnergyApp(tk.Tk):
                 value /= PRESSURE_TO_KPA[selected_unit]
                 display_unit = selected_unit
             lines.append(f"{label:36} {value:>14.8g} {display_unit}")
+        lines.extend(["", "PUMP Q-H CURVE (CATALOG / FIELD DATA)"])
+        if curve_points:
+            lines.append("Flow Q [m3/h]    Pump head H [m]")
+            for q, h in curve_points:
+                lines.append(f"{q:14.6g}    {h:14.6g}")
+        else:
+            lines.append("No Q-H points entered.")
+        lines.append("Reference table only; no curve fitting or interpolation.")
         lines.extend(["", "PIPE GEOMETRY AND REFERENCE PRESSURE"])
         lines.extend(pipe_notes)
         lines.extend(["", "RESULTS", "-" * 82])

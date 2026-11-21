@@ -610,13 +610,17 @@ class PumpEnergyApp(tk.Tk):
             fig = Figure(figsize=(7, 3.4), dpi=100)
             ax = fig.add_subplot(111)
             ax.set_xlabel("Flow rate (m3/h)")
-            ax.set_ylabel("Head (m)")
+            ax.set_ylabel("Pump / System Head (m)")
             ax.plot(flows, heads, color="tab:green", linewidth=2, label="System Q-H")
             ax2 = ax.twinx()
             ax2.plot(flows, powers, color="tab:blue", linewidth=2, label="Hydraulic power")
             ax2.plot(flows, [p / (pump_eta * motor_eta) for p in powers],
                      color="tab:red", linewidth=2, label="Electrical input power")
-            ax2.set_ylabel("Power (kW)")
+            ax2.set_ylabel("Hydraulic / Electrical Power (kW)")
+            max_head = max(heads)
+            if pump_points:
+                max_head = max(max_head, *(h for _, h in pump_points))
+            ax.set_ylim(bottom=0, top=max_head * 1.1 if max_head > 0 else 1)
             if pump_points:
                 pq, phead = zip(*pump_points)
                 ax.plot(pq, phead, color="tab:orange", marker="o",

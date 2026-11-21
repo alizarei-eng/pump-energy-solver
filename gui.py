@@ -373,6 +373,13 @@ class PumpEnergyApp(tk.Tk):
         self.pump_selection_duty = None
         self.pump_selection_curve = None
         self.pump_selection_heads = None
+        if hasattr(self, "system_result_label"):
+            self.system_result_label.configure(
+                text="Flow: --  |  System head: --  |  Hydraulic power: --")
+            self.system_status.configure(text="System inputs changed. Recalculate to refresh results.")
+        if self.system_canvas is not None:
+            self.system_canvas.get_tk_widget().destroy()
+            self.system_canvas = None
         if hasattr(self, "selection_duty_label"):
             self.selection_duty_label.configure(
                 text="System inputs changed. Recalculate System H-Q Curve.")
@@ -479,7 +486,7 @@ class PumpEnergyApp(tk.Tk):
         self.system_segment_selector.configure(values=[str(i+1) for i in range(len(self.system_segments))])
         self.system_segment_selector.set(str(len(self.system_segments)))
         self._update_system_fitting_summary()
-        self.system_report = None
+        self._invalidate_system_results()
 
     def remove_system_segment(self):
         """Remove the selected segment and rebuild segment rows."""
@@ -502,7 +509,7 @@ class PumpEnergyApp(tk.Tk):
             values=[str(i + 1) for i in range(len(self.system_segments))])
         self.system_segment_selector.set(str(min(index, len(self.system_segments)-1) + 1))
         self._update_system_fitting_summary()
-        self.system_report = None
+        self._invalidate_system_results()
 
     def _transition_changed(self, data):
         """One connection selector per boundary; prompt for gradual K only when needed."""
@@ -788,8 +795,12 @@ class PumpEnergyApp(tk.Tk):
                     transition_losses.append(("Sudden contraction", 0.42*(1-(d2/d1)**2), 2.0))
             else:
                 transition_losses.append(("Gradual transition (user K)", current["transition_k"], 2.0))
-        static_head, flows, heads, powers_kw, segment_results = compute_system_curve(
-            segments, transition_losses, dz, dp, rho, nu, qmax, n)
+        try:
+            static_head, flows, heads, powers_kw, segment_results = compute_system_curve(
+                segments, transition_losses, dz, dp, rho, nu, qmax, n)
+        except (ValueError, ZeroDivisionError, OverflowError, ArithmeticError) as exc:
+            messagebox.showerror("System Curve", f"Calculation failed: {exc}")
+            return
         if self.system_canvas is not None:
             self.system_canvas.get_tk_widget().destroy()
         fig = build_system_figure(flows, heads, powers_kw, us=us)

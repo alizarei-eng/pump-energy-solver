@@ -296,9 +296,32 @@ class PumpEnergyApp(tk.Tk):
         ttk.Label(curve_input, text="Reference RPM:").pack(side="left")
         self.selection_rpm = tk.StringVar(value="2900")
         ttk.Entry(curve_input, textvariable=self.selection_rpm, width=9).pack(side="left", padx=6)
-        ttk.Label(curve_input, text="Q (m3/h), H (m) per line:").pack(side="left")
-        self.selection_points = tk.Text(curve_input, width=22, height=4)
-        self.selection_points.pack(side="left", padx=8)
+        points_frame = ttk.Frame(curve_input)
+        points_frame.pack(side="left", padx=10)
+        ttk.Label(points_frame, text="Flow Q (m3/h)").grid(row=0, column=1, padx=4)
+        ttk.Label(points_frame, text="Head H (m)").grid(row=0, column=2, padx=4)
+        self.selection_point_rows = []
+        def add_point():
+            row = len(self.selection_point_rows) + 1
+            q_var, h_var = tk.StringVar(), tk.StringVar()
+            ttk.Label(points_frame, text=f"Point {row}").grid(row=row, column=0, padx=4, pady=2)
+            ttk.Entry(points_frame, textvariable=q_var, width=12).grid(row=row, column=1, padx=4, pady=2)
+            ttk.Entry(points_frame, textvariable=h_var, width=12).grid(row=row, column=2, padx=4, pady=2)
+            self.selection_point_rows.append((q_var, h_var))
+        def remove_point():
+            if len(self.selection_point_rows) <= 2:
+                return
+            row = len(self.selection_point_rows)
+            for widget in points_frame.grid_slaves(row=row):
+                widget.destroy()
+            self.selection_point_rows.pop()
+        buttons_frame = ttk.Frame(curve_input)
+        buttons_frame.pack(side="left", padx=8)
+        ttk.Button(buttons_frame, text="Add Point", command=add_point).pack(pady=3)
+        ttk.Button(buttons_frame, text="Remove Point", command=remove_point).pack(pady=3)
+        add_point()
+        add_point()
+        add_point()
         ttk.Button(selection_tab, text="Calculate pump & motor power",
                    command=self.calculate_pump_selection).pack(anchor="w", pady=12)
         self.selection_result_label = ttk.Label(selection_tab, text="No sizing calculation yet.",
@@ -552,20 +575,21 @@ class PumpEnergyApp(tk.Tk):
                 return value / 100.0
             pump_eta = efficiency(self.selection_pump_eta, "Pump efficiency")
             motor_eta = efficiency(self.selection_motor_eta, "Motor efficiency")
-            raw = self.selection_points.get("1.0", "end").strip()
             pump_points = []
-            if raw:
-                rpm = float(self.selection_rpm.get())
+            for q_var, h_var in self.selection_point_rows:
+                q_text, h_text = q_var.get().strip(), h_var.get().strip()
+                if not q_text and not h_text:
+                    continue
+                if not q_text or not h_text:
+                    raise ValueError("Enter both Q and H for each pump point.")
+                point = (float(q_text.replace(",", ".")), float(h_text.replace(",", ".")))
+                if not all(math.isfinite(v) and v >= 0 for v in point):
+                    raise ValueError("Q and H must be finite and nonnegative.")
+                pump_points.append(point)
+            if pump_points:
+                rpm = float(self.selection_rpm.get().strip().replace(",", "."))
                 if not math.isfinite(rpm) or rpm <= 0:
                     raise ValueError("RPM must be positive.")
-                for line in raw.splitlines():
-                    parts = line.replace(",", " ").replace(";", " ").split()
-                    if len(parts) != 2:
-                        raise ValueError("Each line must have Q and H.")
-                    point = tuple(map(float, parts))
-                    if not all(math.isfinite(v) and v >= 0 for v in point):
-                        raise ValueError("Q and H must be finite and nonnegative.")
-                    pump_points.append(point)
                 pump_points.sort()
                 if len(pump_points) < 2 or any(b[0] <= a[0] for a, b in zip(pump_points, pump_points[1:])):
                     raise ValueError("Enter two or more distinct flow points.")

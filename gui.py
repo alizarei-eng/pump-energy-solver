@@ -283,8 +283,8 @@ class PumpEnergyApp(tk.Tk):
         efficiency_frame.pack(anchor="nw", fill="x")
         self.selection_pump_eta = tk.StringVar(value="75")
         self.selection_motor_eta = tk.StringVar(value="93")
-        for row, (label, var) in enumerate((("Pump efficiency", self.selection_pump_eta),
-                                             ("Motor efficiency", self.selection_motor_eta))):
+        for row, (label, var) in enumerate((("Pump efficiency (hydraulic output / shaft input)", self.selection_pump_eta),
+                                             ("Motor efficiency (shaft output / electrical input)", self.selection_motor_eta))):
             ttk.Label(efficiency_frame, text=label).grid(row=row, column=0, sticky="w", pady=5)
             ttk.Entry(efficiency_frame, textvariable=var, width=12).grid(
                 row=row, column=1, padx=12, pady=5)

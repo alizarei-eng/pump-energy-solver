@@ -352,9 +352,9 @@ class PumpEnergyApp(tk.Tk):
         ttk.Button(selection_tab, text="Calculate pump & motor power",
                    command=self.calculate_pump_selection).pack(anchor="w", pady=12)
         self.selection_result_label = ttk.Label(selection_tab, text="No sizing calculation yet.",
-            font=("Segoe UI", 11), justify="left")
-        self.selection_result_label.pack(anchor="w", pady=6)
-        self.selection_plot_frame = ttk.LabelFrame(selection_tab, text="Hydraulic & Electrical Power vs Flow", padding=4)
+            font=("Segoe UI", 11), justify="left", wraplength=650)
+        self.selection_result_label.pack(fill="x", anchor="w", pady=6)
+        self.selection_plot_frame = ttk.LabelFrame(selection_tab, text="Pump / System Head and Power vs Flow", padding=4)
         self.selection_plot_frame.pack(fill="both", expand=True, pady=(8, 4))
         ttk.Label(selection_tab, text="Preliminary sizing only. Check manufacturer Q-H, efficiency and shaft-power curves.",
                   wraplength=750).pack(anchor="w", pady=12)
@@ -681,9 +681,9 @@ class PumpEnergyApp(tk.Tk):
                         ax.scatter([op_q], [op_h], color="black", zorder=6,
                                    label="Operating point" if i == 1 else None)
                         op_lines.append(
-                            f"Operating point {i}: Q={op_q:.2f} m3/h | H={op_h:.2f} m | "
-                            f"Hydraulic power={op_ph:.2f} kW | "
-                            f"Electrical input power={op_electric:.2f} kW")
+                            f"Operating point {i}  |  Q = {op_q:.2f} m3/h  |  H = {op_h:.2f} m\n"
+                            f"Hydraulic power = {op_ph:.2f} kW  |  "
+                            f"Electrical input power = {op_electric:.2f} kW")
                     self.selection_result_label.configure(text="\n".join(op_lines))
                 else:
                     self.selection_result_label.configure(

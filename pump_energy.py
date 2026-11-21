@@ -126,7 +126,7 @@ def solve(inputs):
             relation(("Q", d, vel), lambda v, u, d=d, vel=vel: area_relation(v, u, d, vel), "continuity")
         relation(("P1", "P2", "dP"), pressure, "pressure difference")
         relation(("Hp", "dP", "rho", "V1", "V2", "dz", "hL"), head, "full mechanical energy")
-        relation(("Ph", "rho", "Q", "Hp"), hydraulic, "hydraulic power")
+        relation(("rho", "Q", "Hp", "Ph"), hydraulic, "hydraulic power")
         relation(("Ps", "Ph", "eta"), shaft, "shaft power")
         if len(values) == count:
             break

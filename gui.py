@@ -53,6 +53,7 @@ class PumpEnergyApp(tk.Tk):
         self.system_report = None
         self.pump_selection_duty = None
         self.pump_selection_curve = None
+        self.pump_selection_heads = None
         self.selection_canvas = None
         self.system_sensitivity_inputs = None
         self.system_segments = []
@@ -290,6 +291,14 @@ class PumpEnergyApp(tk.Tk):
             ttk.Label(efficiency_frame, text=label).grid(row=row, column=0, sticky="w", pady=5)
             ttk.Entry(efficiency_frame, textvariable=var, width=12).grid(
                 row=row, column=1, padx=12, pady=5)
+        curve_input = ttk.LabelFrame(selection_tab, text="Manual Pump Q-H Curve", padding=8)
+        curve_input.pack(fill="x", pady=8)
+        ttk.Label(curve_input, text="Reference RPM:").pack(side="left")
+        self.selection_rpm = tk.StringVar(value="2900")
+        ttk.Entry(curve_input, textvariable=self.selection_rpm, width=9).pack(side="left", padx=6)
+        ttk.Label(curve_input, text="Q (m3/h), H (m) per line:").pack(side="left")
+        self.selection_points = tk.Text(curve_input, width=22, height=4)
+        self.selection_points.pack(side="left", padx=8)
         ttk.Button(selection_tab, text="Calculate pump & motor power",
                    command=self.calculate_pump_selection).pack(anchor="w", pady=12)
         self.selection_result_label = ttk.Label(selection_tab, text="No sizing calculation yet.",
@@ -543,6 +552,23 @@ class PumpEnergyApp(tk.Tk):
                 return value / 100.0
             pump_eta = efficiency(self.selection_pump_eta, "Pump efficiency")
             motor_eta = efficiency(self.selection_motor_eta, "Motor efficiency")
+            raw = self.selection_points.get("1.0", "end").strip()
+            pump_points = []
+            if raw:
+                rpm = float(self.selection_rpm.get())
+                if not math.isfinite(rpm) or rpm <= 0:
+                    raise ValueError("RPM must be positive.")
+                for line in raw.splitlines():
+                    parts = line.replace(",", " ").replace(";", " ").split()
+                    if len(parts) != 2:
+                        raise ValueError("Each line must have Q and H.")
+                    point = tuple(map(float, parts))
+                    if not all(math.isfinite(v) and v >= 0 for v in point):
+                        raise ValueError("Q and H must be finite and nonnegative.")
+                    pump_points.append(point)
+                pump_points.sort()
+                if len(pump_points) < 2 or any(b[0] <= a[0] for a, b in zip(pump_points, pump_points[1:])):
+                    raise ValueError("Enter two or more distinct flow points.")
         except ValueError as exc:
             messagebox.showerror("Pump Selection", str(exc))
             return
@@ -553,22 +579,54 @@ class PumpEnergyApp(tk.Tk):
             text=f"Total electrical input power: {electric:.2f} kW")
         if self.pump_selection_curve is not None:
             flows, powers = self.pump_selection_curve
+            heads = self.pump_selection_heads
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-            fig = Figure(figsize=(7, 3.2), dpi=100)
+            fig = Figure(figsize=(7, 3.4), dpi=100)
             ax = fig.add_subplot(111)
-            ax.plot(flows, powers, color="tab:blue", linewidth=2,
-                    label="System hydraulic power")
-            ax.plot(flows, [p / (pump_eta * motor_eta) for p in powers],
-                    color="tab:red", linewidth=2,
-                    label="Estimated electrical input power")
-            ax.scatter([q], [ph], color="tab:blue", zorder=4)
-            ax.scatter([q], [electric], color="tab:red", zorder=4)
             ax.set_xlabel("Flow rate (m3/h)")
-            ax.set_ylabel("Power (kW)")
-            ax.set_title("Hydraulic vs electrical power (constant efficiencies)")
+            ax.set_ylabel("Head (m)")
+            ax.plot(flows, heads, color="tab:green", linewidth=2, label="System Q-H")
+            ax2 = ax.twinx()
+            ax2.plot(flows, powers, color="tab:blue", linewidth=2, label="Hydraulic power")
+            ax2.plot(flows, [p / (pump_eta * motor_eta) for p in powers],
+                     color="tab:red", linewidth=2, label="Electrical input power")
+            ax2.set_ylabel("Power (kW)")
+            if pump_points:
+                pq, phead = zip(*pump_points)
+                ax.plot(pq, phead, color="tab:orange", marker="o",
+                        linewidth=2, label="Pump Q-H")
+                def interp(points, x):
+                    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+                        if x0 <= x <= x1:
+                            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+                    return None
+                system_points = list(zip(flows, heads))
+                low, high = max(flows[0], pq[0]), min(flows[-1], pq[-1])
+                crossings = []
+                if low <= high:
+                    nodes = sorted(set([low, high] +
+                        [x for x in flows if low < x < high] +
+                        [x for x in pq if low < x < high]))
+                    for left, right in zip(nodes, nodes[1:]):
+                        dl = interp(pump_points, left) - interp(system_points, left)
+                        dr = interp(pump_points, right) - interp(system_points, right)
+                        if dl == 0:
+                            crossings.append(left)
+                        if dl * dr < 0 or (dr == 0 and dl != 0):
+                            crossings.append(left + (right-left) * (-dl) / (dr-dl))
+                if crossings:
+                    op_q = crossings[0]
+                    op_h = interp(system_points, op_q)
+                    ax.scatter([op_q], [op_h], color="black", zorder=6,
+                               label=f"Operating point: {op_q:.1f} m3/h, {op_h:.1f} m")
+                else:
+                    messagebox.showinfo("Pump Selection",
+                        "No operating point within the entered curve ranges.")
             ax.grid(True, alpha=0.3)
-            ax.legend(loc="best")
+            l1, n1 = ax.get_legend_handles_labels()
+            l2, n2 = ax2.get_legend_handles_labels()
+            ax.legend(l1+l2, n1+n2, loc="best", fontsize=8)
             fig.tight_layout()
             if self.selection_canvas is not None:
                 self.selection_canvas.get_tk_widget().destroy()
@@ -576,7 +634,7 @@ class PumpEnergyApp(tk.Tk):
             self.selection_canvas.draw()
             self.selection_canvas.get_tk_widget().pack(fill="both", expand=True)
 
-        
+
     def calculate_system_curve(self):
         try:
             us = self.system_units.get() == "US"
@@ -714,6 +772,7 @@ class PumpEnergyApp(tk.Tk):
                    "Manufacturer fitting K and roughness should replace indicative reference values for final design."]
         self.pump_selection_duty = (qmax, heads[-1], powers_kw[-1])
         self.pump_selection_curve = (list(flows), list(powers_kw))
+        self.pump_selection_heads = list(heads)
         self.selection_duty_label.configure(text=(
             f"Imported duty: Q={qmax:.4f} m3/h | H={heads[-1]:.4f} m | "
             f"Hydraulic power={powers_kw[-1]:.4f} kW"))

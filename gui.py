@@ -420,7 +420,6 @@ class PumpEnergyApp(tk.Tk):
                         segment[key].set(f"{value * self._system_factor(key, current == 'US'):.10g}")
                     except ValueError:
                         pass
-            if previous != current:
             self._invalidate_system_results()
         self._system_previous_units = current
         us = current == "US"

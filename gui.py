@@ -52,6 +52,11 @@ class PumpEnergyApp(tk.Tk):
         self.pump_selection_curve = None
         self.pump_selection_heads = None
         self.selection_canvas = None
+        self.system_chart_axes = None
+        self.selection_chart_axes = None
+        self.system_chart_options = {label: tk.BooleanVar(value=True) for label in ("System head", "Hydraulic power")}
+        self.selection_chart_options = {label: tk.BooleanVar(value=True) for label in
+            ("System Q-H", "Pump Q-H", "Hydraulic power", "Electrical input power", "Operating point")}
         self.system_sensitivity_inputs = None
         self.system_segments = []
         self.system_selected_segment = tk.IntVar(value=0)
@@ -246,6 +251,12 @@ class PumpEnergyApp(tk.Tk):
             text="Flow: --  |  System head: --  |  Hydraulic power: --",
             anchor="w", font=("TkDefaultFont", 11, "bold"))
         self.system_result_label.pack(fill="x", padx=8, pady=(1, 5))
+        system_chart_controls = ttk.Frame(system_tab)
+        system_chart_controls.pack(fill="x", padx=8)
+        ttk.Label(system_chart_controls, text="Show curves:").pack(side="left", padx=(0, 8))
+        for label, var in self.system_chart_options.items():
+            ttk.Checkbutton(system_chart_controls, text=label, variable=var,
+                            command=self._update_system_chart_visibility).pack(side="left", padx=6)
         self.system_plot_frame = ttk.LabelFrame(system_tab, text="System H-Q diagram", padding=4)
         self.system_plot_frame.pack(fill="both", expand=True)
         self.system_units.trace_add("write", lambda *_: self._update_system_units())
@@ -331,6 +342,12 @@ class PumpEnergyApp(tk.Tk):
         self.selection_result_label = ttk.Label(selection_tab, text="No sizing calculation yet.",
             font=("Segoe UI", 11), justify="left", wraplength=650)
         self.selection_result_label.pack(fill="x", anchor="w", pady=6)
+        selection_chart_controls = ttk.Frame(selection_tab)
+        selection_chart_controls.pack(fill="x")
+        ttk.Label(selection_chart_controls, text="Show curves:").pack(side="left", padx=(0, 6))
+        for label, var in self.selection_chart_options.items():
+            ttk.Checkbutton(selection_chart_controls, text=label, variable=var,
+                            command=self._update_selection_chart_visibility).pack(side="left", padx=4)
         self.selection_plot_frame = ttk.LabelFrame(selection_tab, text="Pump / System Head and Power vs Flow", padding=4)
         self.selection_plot_frame.pack(fill="both", expand=True, pady=(8, 4))
         ttk.Label(selection_tab, text="Preliminary sizing only. Check manufacturer Q-H, efficiency and shaft-power curves.",
@@ -366,6 +383,34 @@ class PumpEnergyApp(tk.Tk):
                       "Unknown values are not assumed to be zero.\n"
                       "Shaft power (Ps) is mechanical power, not electrical input power.")
 
+    @staticmethod
+    def _apply_chart_visibility(axes, options, canvas):
+        """Toggle chart series without repeating hydraulic calculations."""
+        if axes is None or canvas is None:
+            return
+        primary = axes[0]
+        handles, labels = [], []
+        for ax in axes:
+            for artist in [*ax.lines, *ax.collections]:
+                label = artist.get_label()
+                if label in options:
+                    artist.set_visible(options[label].get())
+                    if artist.get_visible() and label not in labels:
+                        handles.append(artist)
+                        labels.append(label)
+        old_legend = primary.get_legend()
+        if old_legend is not None:
+            old_legend.remove()
+        if handles:
+            primary.legend(handles, labels, loc="best", fontsize=8)
+        canvas.draw_idle()
+
+    def _update_system_chart_visibility(self):
+        self._apply_chart_visibility(self.system_chart_axes, self.system_chart_options, self.system_canvas)
+
+    def _update_selection_chart_visibility(self):
+        self._apply_chart_visibility(self.selection_chart_axes, self.selection_chart_options, self.selection_canvas)
+
     def _invalidate_system_results(self, *_args):
         """Discard calculated curves when editable system inputs change."""
         self.system_report = None
@@ -380,6 +425,7 @@ class PumpEnergyApp(tk.Tk):
         if self.system_canvas is not None:
             self.system_canvas.get_tk_widget().destroy()
             self.system_canvas = None
+        self.system_chart_axes = None
         if hasattr(self, "selection_duty_label"):
             self.selection_duty_label.configure(
                 text="System inputs changed. Recalculate System H-Q Curve.")
@@ -387,6 +433,7 @@ class PumpEnergyApp(tk.Tk):
         if self.selection_canvas is not None:
             self.selection_canvas.get_tk_widget().destroy()
             self.selection_canvas = None
+        self.selection_chart_axes = None
 
     def _system_factor(self, key, us=None):
         if us is None:
@@ -700,6 +747,8 @@ class PumpEnergyApp(tk.Tk):
             if self.selection_canvas is not None:
                 self.selection_canvas.get_tk_widget().destroy()
             self.selection_canvas = FigureCanvasTkAgg(fig, master=self.selection_plot_frame)
+            self.selection_chart_axes = (ax, ax2)
+            self._update_selection_chart_visibility()
             self.selection_canvas.draw()
             self.selection_canvas.get_tk_widget().pack(fill="both", expand=True)
 
@@ -804,6 +853,8 @@ class PumpEnergyApp(tk.Tk):
             self.system_canvas.get_tk_widget().destroy()
         fig = build_system_figure(flows, heads, powers_kw, us=us)
         self.system_canvas = FigureCanvasTkAgg(fig, master=self.system_plot_frame)
+        self.system_chart_axes = tuple(fig.axes)
+        self._update_system_chart_visibility()
         self.system_canvas.draw()
         self.system_canvas.get_tk_widget().pack(fill="both", expand=True)
         report = ["SYSTEM CURVE | MULTI-SEGMENT ENGINEERING REPORT",

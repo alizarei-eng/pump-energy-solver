@@ -1,6 +1,6 @@
 # Pump Energy Solver
 
-Interactive Python CLI that **calculates every quantity supported by the available input data**, using the full mechanical energy equation, continuity, and pump-power relations. No external dependencies. Python 3.9+.
+Desktop Tkinter application and interactive Python CLI that **calculates every quantity supported by the available input data**, using the full mechanical energy equation, continuity, and pump-power relations. No external dependencies. Python 3.9+.
 
 ## Install and run
 
@@ -79,3 +79,39 @@ The GUI calculates water density automatically. Choose freshwater or natural sea
 The pressure unit selector supports **bar, psi, kPa and Pa** for inlet pressure, outlet pressure and pressure difference. All are converted to kPa before calling the existing calculation engine; results display in the selected unit. P1 and P2 must use the same gauge reference. Pressure differences do not have a gauge/absolute reference.
 
 Density is not an editable parameter in the GUI. It is reported as a calculated property in the results and TXT export. The CLI (`pump_energy.py`) remains unchanged and retains its manual density input. Pump shaft power is mechanical, not electrical input power.
+
+
+## Desktop workflow (7 tabs)
+
+The GUI contains **Flow & Geometry**, **Pressure & Elevation**, **Fluid & Losses**,
+**Pump Performance**, **System H-Q Curve**, **Pump Selection**, and
+**Results & Report**. The old standalone **Pump Q-H Curve** tab was removed;
+enter pump Q-H points directly in **Pump Selection**.
+
+For the independent system/pump workflow:
+
+1. Enter boundary conditions, pipe segments, and fittings in **System H-Q Curve**.
+2. Click **Calculate System Curve** to produce system head and hydraulic power versus flow.
+3. Open **Pump Selection**, enter the pump's measured/catalog Q-H points and
+   user-supplied pump and motor efficiencies, then calculate.
+4. The operating point is a pump/system curve intersection within the
+   **entered** flow ranges; curves are linearly interpolated, not extrapolated.
+5. Electrical input power is an estimate assuming constant entered efficiencies,
+   not a measured motor or VFD electrical power.
+
+Changing system inputs invalidates previously calculated system/pump results.
+Recalculate the system curve before relying on pump selection outputs.
+System projects can be saved and opened as JSON.
+
+The first four tabs feed the separate mechanical-energy equation solver,
+with results displayed in **Results & Report**.
+
+## Regression tests
+
+Run the Python standard-library tests from the repository root:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The GUI itself still requires interactive testing on a machine with a display.

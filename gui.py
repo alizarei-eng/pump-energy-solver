@@ -301,13 +301,13 @@ class PumpEnergyApp(tk.Tk):
 
         # Fixed-height scrollable input table: adding points must not shrink the plot.
         table_container = ttk.Frame(curve_input)
-        table_container.pack(fill="x", expand=False)
-        points_canvas = tk.Canvas(table_container, height=120, highlightthickness=0)
+        table_container.pack(anchor="w", expand=False)
+        points_canvas = tk.Canvas(table_container, width=340, height=120, highlightthickness=0)
         points_scroll = ttk.Scrollbar(table_container, orient="vertical",
                                       command=points_canvas.yview)
         points_canvas.configure(yscrollcommand=points_scroll.set)
         points_scroll.pack(side="right", fill="y")
-        points_canvas.pack(side="left", fill="both", expand=True)
+        points_canvas.pack(side="left")
         points_frame = ttk.Frame(points_canvas)
         points_window = points_canvas.create_window((0, 0), window=points_frame, anchor="nw")
         points_frame.bind("<Configure>", lambda event: points_canvas.configure(
@@ -317,8 +317,6 @@ class PumpEnergyApp(tk.Tk):
         ttk.Label(points_frame, text="Point").grid(row=0, column=0, sticky="w", padx=4)
         ttk.Label(points_frame, text="Flow Q (m3/h)").grid(row=0, column=1, sticky="w", padx=4)
         ttk.Label(points_frame, text="Head H (m)").grid(row=0, column=2, sticky="w", padx=4)
-        points_frame.columnconfigure(1, weight=1)
-        points_frame.columnconfigure(2, weight=1)
         self.selection_point_rows = []
 
         def add_point():
@@ -326,10 +324,10 @@ class PumpEnergyApp(tk.Tk):
             q_var, h_var = tk.StringVar(), tk.StringVar()
             ttk.Label(points_frame, text=f"Point {row}").grid(
                 row=row, column=0, sticky="w", padx=4, pady=2)
-            ttk.Entry(points_frame, textvariable=q_var, width=14).grid(
-                row=row, column=1, sticky="ew", padx=4, pady=2)
-            ttk.Entry(points_frame, textvariable=h_var, width=14).grid(
-                row=row, column=2, sticky="ew", padx=4, pady=2)
+            ttk.Entry(points_frame, textvariable=q_var, width=12).grid(
+                row=row, column=1, sticky="w", padx=4, pady=2)
+            ttk.Entry(points_frame, textvariable=h_var, width=12).grid(
+                row=row, column=2, sticky="w", padx=4, pady=2)
             self.selection_point_rows.append((q_var, h_var))
             points_canvas.update_idletasks()
             points_canvas.yview_moveto(1.0)

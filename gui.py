@@ -600,7 +600,8 @@ class PumpEnergyApp(tk.Tk):
         shaft = ph / pump_eta
         electric = shaft / motor_eta
         self.selection_result_label.configure(
-            text=f"Total electrical input power: {electric:.2f} kW")
+            text=f"Design-flow electrical input power: {electric:.2f} kW"
+                 + ("\nOperating point: unavailable (enter pump Q-H points)." if not pump_points else ""))
         if self.pump_selection_curve is not None:
             flows, powers = self.pump_selection_curve
             heads = self.pump_selection_heads
@@ -640,13 +641,23 @@ class PumpEnergyApp(tk.Tk):
                         if dl * dr < 0 or (dr == 0 and dl != 0):
                             crossings.append(left + (right-left) * (-dl) / (dr-dl))
                 if crossings:
-                    op_q = crossings[0]
-                    op_h = interp(system_points, op_q)
-                    ax.scatter([op_q], [op_h], color="black", zorder=6,
-                               label=f"Operating point: {op_q:.1f} m3/h, {op_h:.1f} m")
+                    crossings = sorted(set(round(x, 10) for x in crossings))
+                    op_lines = []
+                    for i, op_q in enumerate(crossings, 1):
+                        op_h = interp(system_points, op_q)
+                        op_ph = interp(list(zip(flows, powers)), op_q)
+                        op_electric = op_ph / (pump_eta * motor_eta)
+                        ax.scatter([op_q], [op_h], color="black", zorder=6,
+                                   label="Operating point" if i == 1 else None)
+                        op_lines.append(
+                            f"Operating point {i}: Q={op_q:.2f} m3/h | H={op_h:.2f} m | "
+                            f"Hydraulic power={op_ph:.2f} kW | "
+                            f"Electrical input power={op_electric:.2f} kW")
+                    self.selection_result_label.configure(text="\n".join(op_lines))
                 else:
-                    messagebox.showinfo("Pump Selection",
-                        "No operating point within the entered curve ranges.")
+                    self.selection_result_label.configure(
+                        text="No operating point within the entered pump/system curve ranges.\n"
+                             f"Design-flow electrical input power: {electric:.2f} kW")
             ax.grid(True, alpha=0.3)
             l1, n1 = ax.get_legend_handles_labels()
             l2, n2 = ax2.get_legend_handles_labels()

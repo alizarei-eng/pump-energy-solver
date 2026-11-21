@@ -853,18 +853,18 @@ class PumpEnergyApp(tk.Tk):
             self.selection_canvas.draw()
             self.selection_canvas.get_tk_widget().pack(fill="both", expand=True)
         self.selection_report = (
-            "PUMP SELECTION REPORT\\n"
-            f"Generated: {datetime.now().isoformat(timespec='seconds')}\\n"
-            f"Pump efficiency: {pump_eta * 100:.6g}%\\n"
-            f"Motor efficiency: {motor_eta * 100:.6g}%\\n"
-            f"Reference RPM: {self.selection_rpm.get()}\\n"
-            f"System design flow: {q:.6g} m3/h\\n"
-            f"System design head: {h:.6g} m\\n"
-            f"System design hydraulic power: {ph:.6g} kW\\n"
-            f"Design-flow electrical power estimate: {electric:.6g} kW\\n"
-            "Pump Q-H points (m3/h, m):\\n"
-            + "".join(f"  {pq:.8g}, {phead:.8g}\\n" for pq, phead in pump_points)
-            + "\\nRESULTS\\n" + self.selection_result_label.cget("text") + "\\n"
+            "PUMP SELECTION REPORT\n"
+            f"Generated: {datetime.now().isoformat(timespec='seconds')}\n"
+            f"Pump efficiency: {pump_eta * 100:.6g}%\n"
+            f"Motor efficiency: {motor_eta * 100:.6g}%\n"
+            f"Reference RPM: {self.selection_rpm.get()}\n"
+            f"System design flow: {q:.6g} m3/h\n"
+            f"System design head: {h:.6g} m\n"
+            f"System design hydraulic power: {ph:.6g} kW\n"
+            f"Design-flow electrical power estimate: {electric:.6g} kW\n"
+            "Pump Q-H points (m3/h, m):\n"
+            + "".join(f"  {pq:.8g}, {phead:.8g}\n" for pq, phead in pump_points)
+            + "\nRESULTS\n" + self.selection_result_label.cget("text") + "\n"
         )
 
 

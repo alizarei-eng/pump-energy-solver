@@ -295,7 +295,7 @@ class PumpEnergyApp(tk.Tk):
         self.selection_result_label = ttk.Label(selection_tab, text="No sizing calculation yet.",
             font=("Segoe UI", 11), justify="left")
         self.selection_result_label.pack(anchor="w", pady=6)
-        self.selection_plot_frame = ttk.LabelFrame(selection_tab, text="Estimated Electrical Power vs Flow", padding=4)
+        self.selection_plot_frame = ttk.LabelFrame(selection_tab, text="Hydraulic & Electrical Power vs Flow", padding=4)
         self.selection_plot_frame.pack(fill="both", expand=True, pady=(8, 4))
         ttk.Label(selection_tab, text="Preliminary sizing only. Check manufacturer Q-H, efficiency and shaft-power curves.",
                   wraplength=750).pack(anchor="w", pady=12)
@@ -557,13 +557,16 @@ class PumpEnergyApp(tk.Tk):
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
             fig = Figure(figsize=(7, 3.2), dpi=100)
             ax = fig.add_subplot(111)
+            ax.plot(flows, powers, color="tab:blue", linewidth=2,
+                    label="System hydraulic power")
             ax.plot(flows, [p / (pump_eta * motor_eta) for p in powers],
-                    color="tab:blue", linewidth=2)
-            ax.scatter([q], [electric], color="tab:red", zorder=4,
-                       label=f"Design duty: {q:.2f} m3/h, {electric:.2f} kW")
+                    color="tab:red", linewidth=2,
+                    label="Estimated electrical input power")
+            ax.scatter([q], [ph], color="tab:blue", zorder=4)
+            ax.scatter([q], [electric], color="tab:red", zorder=4)
             ax.set_xlabel("Flow rate (m3/h)")
-            ax.set_ylabel("Estimated electrical input power (kW)")
-            ax.set_title("Constant-efficiency estimate (not manufacturer pump curve)")
+            ax.set_ylabel("Power (kW)")
+            ax.set_title("Hydraulic vs electrical power (constant efficiencies)")
             ax.grid(True, alpha=0.3)
             ax.legend(loc="best")
             fig.tight_layout()

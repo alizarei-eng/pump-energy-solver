@@ -270,8 +270,13 @@ class PumpEnergyApp(tk.Tk):
         self.selection_duty_label = ttk.Label(selection_tab,
             text="Calculate System H-Q Curve first to import flow, head and hydraulic power.")
         self.selection_duty_label.pack(anchor="w", pady=(0, 12))
-        efficiency_frame = ttk.LabelFrame(selection_tab, text="User-supplied efficiencies (%)", padding=12)
-        efficiency_frame.pack(anchor="nw", fill="x")
+        # Side-by-side inputs use the unused horizontal space and preserve chart height.
+        selection_inputs = ttk.Frame(selection_tab)
+        selection_inputs.pack(fill="x", pady=(0, 6))
+        selection_inputs.columnconfigure(0, weight=1, uniform="selection")
+        selection_inputs.columnconfigure(1, weight=1, uniform="selection")
+        efficiency_frame = ttk.LabelFrame(selection_inputs, text="User-supplied efficiencies (%)", padding=12)
+        efficiency_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         self.selection_pump_eta = tk.StringVar(value="75")
         self.selection_motor_eta = tk.StringVar(value="93")
         for row, (label, var) in enumerate((("Pump efficiency (hydraulic output / shaft input)", self.selection_pump_eta),
@@ -279,8 +284,8 @@ class PumpEnergyApp(tk.Tk):
             ttk.Label(efficiency_frame, text=label).grid(row=row, column=0, sticky="w", pady=5)
             ttk.Entry(efficiency_frame, textvariable=var, width=12).grid(
                 row=row, column=1, padx=12, pady=5)
-        curve_input = ttk.LabelFrame(selection_tab, text="Manual Pump Q-H Curve", padding=8)
-        curve_input.pack(fill="x", pady=6)
+        curve_input = ttk.LabelFrame(selection_inputs, text="Manual Pump Q-H Curve", padding=8)
+        curve_input.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         rpm_row = ttk.Frame(curve_input)
         rpm_row.pack(fill="x", pady=(0, 4))
         ttk.Label(rpm_row, text="Reference RPM:").pack(side="left")

@@ -52,6 +52,7 @@ class PumpEnergyApp(tk.Tk):
         self.pump_selection_curve = None
         self.pump_selection_heads = None
         self.selection_canvas = None
+        self.selection_report = None
         self.system_chart_axes = None
         self.selection_chart_axes = None
         self.system_chart_options = {label: tk.BooleanVar(value=True) for label in ("System head", "Hydraulic power")}
@@ -339,9 +340,16 @@ class PumpEnergyApp(tk.Tk):
         ttk.Button(buttons_frame, text="Add Point", command=add_point).pack(
             side="left", padx=(0, 8))
         ttk.Button(buttons_frame, text="Remove Point", command=remove_point).pack(side="left")
+        self._selection_add_point = add_point
+        self._selection_remove_point = remove_point
         add_point()
         add_point()
         add_point()
+        selection_file_controls = ttk.Frame(selection_tab)
+        selection_file_controls.pack(fill="x", pady=(2, 0))
+        ttk.Button(selection_file_controls, text="Save Pump Project", command=self.save_pump_selection_project).pack(side="left", padx=(0, 6))
+        ttk.Button(selection_file_controls, text="Open Pump Project", command=self.load_pump_selection_project).pack(side="left", padx=6)
+        ttk.Button(selection_file_controls, text="Export Pump TXT", command=self.export_pump_selection_txt).pack(side="left", padx=6)
         ttk.Button(selection_tab, text="Calculate pump & motor power",
                    command=self.calculate_pump_selection).pack(anchor="w", pady=12)
         self.selection_result_label = ttk.Label(selection_tab, text="No sizing calculation yet.",
@@ -644,6 +652,93 @@ class PumpEnergyApp(tk.Tk):
         self._update_system_fitting_summary()
         self.system_report = None
 
+    def save_pump_selection_project(self):
+        """Save editable pump inputs separately from the system project."""
+        project = {
+            "format": "pump-energy-solver.pump-selection",
+            "version": 1,
+            "pump_efficiency_percent": self.selection_pump_eta.get(),
+            "motor_efficiency_percent": self.selection_motor_eta.get(),
+            "reference_rpm": self.selection_rpm.get(),
+            "qh_points": [[q.get(), h.get()] for q, h in self.selection_point_rows],
+        }
+        path = filedialog.asksaveasfilename(
+            title="Save Pump Selection Project", defaultextension=".json",
+            filetypes=[("Pump Selection project", "*.json")],
+            initialfile="pump_selection_project.json")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as stream:
+                json.dump(project, stream, indent=2, ensure_ascii=False)
+        except OSError as exc:
+            messagebox.showerror("Save Pump Project", str(exc))
+
+    def load_pump_selection_project(self):
+        """Validate project content before modifying any current fields."""
+        path = filedialog.askopenfilename(
+            title="Open Pump Selection Project",
+            filetypes=[("Pump Selection project", "*.json"), ("JSON files", "*.json")])
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as stream:
+                project = json.load(stream)
+            if not isinstance(project, dict) or project.get("format") != "pump-energy-solver.pump-selection" or project.get("version") != 1:
+                raise ValueError("Unsupported Pump Selection project format/version.")
+            for key in ("pump_efficiency_percent", "motor_efficiency_percent", "reference_rpm"):
+                value = project.get(key)
+                if not isinstance(value, str):
+                    raise ValueError(f"Invalid {key}.")
+                number = float(value.strip().replace(",", "."))
+                if not math.isfinite(number) or number <= 0 or (key != "reference_rpm" and number > 100):
+                    raise ValueError(f"Invalid {key} value.")
+            points = project.get("qh_points")
+            if not isinstance(points, list) or not 2 <= len(points) <= 500:
+                raise ValueError("Project requires 2 to 500 Q-H rows.")
+            for point in points:
+                if not isinstance(point, list) or len(point) != 2 or not all(isinstance(v, str) for v in point):
+                    raise ValueError("Invalid Q-H point.")
+                if any(point) and not all(point):
+                    raise ValueError("Incomplete Q-H point.")
+                for value in point:
+                    if value and (not math.isfinite(float(value.replace(",", "."))) or float(value.replace(",", ".")) < 0):
+                        raise ValueError("Invalid Q-H numeric value.")
+        except (OSError, ValueError, TypeError, OverflowError, json.JSONDecodeError) as exc:
+            messagebox.showerror("Open Pump Project", f"Could not load project: {exc}")
+            return
+        self.selection_pump_eta.set(project["pump_efficiency_percent"])
+        self.selection_motor_eta.set(project["motor_efficiency_percent"])
+        self.selection_rpm.set(project["reference_rpm"])
+        while len(self.selection_point_rows) > 2:
+            self._selection_remove_point()
+        while len(self.selection_point_rows) < len(points):
+            self._selection_add_point()
+        for (q_var, h_var), (q, h) in zip(self.selection_point_rows, points):
+            q_var.set(q)
+            h_var.set(h)
+        self.selection_report = None
+        self.selection_result_label.configure(text="Pump project loaded. Calculate to update results.")
+        if self.selection_canvas is not None:
+            self.selection_canvas.get_tk_widget().destroy()
+            self.selection_canvas = None
+            self.selection_chart_axes = None
+
+    def export_pump_selection_txt(self):
+        if not self.selection_report:
+            messagebox.showwarning("Pump Selection", "Calculate Pump Selection before exporting.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export Pump Selection TXT", defaultextension=".txt",
+            filetypes=[("Text files", "*.txt")], initialfile="pump_selection_report.txt")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write(self.selection_report)
+        except OSError as exc:
+            messagebox.showerror("Export Pump TXT", str(exc))
+
     def calculate_pump_selection(self):
         """Size a single pump using the latest calculated system duty point."""
         if self.pump_selection_duty is None:
@@ -681,6 +776,7 @@ class PumpEnergyApp(tk.Tk):
         q, h, ph = self.pump_selection_duty
         shaft = ph / pump_eta
         electric = shaft / motor_eta
+        self.selection_report = None
         self.selection_result_label.configure(
             text=f"Design-flow electrical input power: {electric:.2f} kW"
                  + ("\nOperating point: unavailable (enter pump Q-H points)." if not pump_points else ""))
@@ -756,6 +852,20 @@ class PumpEnergyApp(tk.Tk):
             self._update_selection_chart_visibility()
             self.selection_canvas.draw()
             self.selection_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.selection_report = (
+            "PUMP SELECTION REPORT\\n"
+            f"Generated: {datetime.now().isoformat(timespec='seconds')}\\n"
+            f"Pump efficiency: {pump_eta * 100:.6g}%\\n"
+            f"Motor efficiency: {motor_eta * 100:.6g}%\\n"
+            f"Reference RPM: {self.selection_rpm.get()}\\n"
+            f"System design flow: {q:.6g} m3/h\\n"
+            f"System design head: {h:.6g} m\\n"
+            f"System design hydraulic power: {ph:.6g} kW\\n"
+            f"Design-flow electrical power estimate: {electric:.6g} kW\\n"
+            "Pump Q-H points (m3/h, m):\\n"
+            + "".join(f"  {pq:.8g}, {phead:.8g}\\n" for pq, phead in pump_points)
+            + "\\nRESULTS\\n" + self.selection_result_label.cget("text") + "\\n"
+        )
 
 
     def calculate_system_curve(self):

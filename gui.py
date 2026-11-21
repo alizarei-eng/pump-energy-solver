@@ -63,6 +63,8 @@ class PumpEnergyApp(tk.Tk):
         self.pressure_unit = tk.StringVar(value="kPa")
         self.report = None
         self._build()
+        for var in self.system_vars.values():
+            var.trace_add("write", self._invalidate_system_results)
 
     def _build(self):
         heading = ttk.Frame(self, padding=(16, 12))
@@ -364,6 +366,21 @@ class PumpEnergyApp(tk.Tk):
                       "Unknown values are not assumed to be zero.\n"
                       "Shaft power (Ps) is mechanical power, not electrical input power.")
 
+    def _invalidate_system_results(self, *_args):
+        """Discard calculated curves when editable system inputs change."""
+        self.system_report = None
+        self.system_sensitivity_inputs = None
+        self.pump_selection_duty = None
+        self.pump_selection_curve = None
+        self.pump_selection_heads = None
+        if hasattr(self, "selection_duty_label"):
+            self.selection_duty_label.configure(
+                text="System inputs changed. Recalculate System H-Q Curve.")
+            self.selection_result_label.configure(text="Recalculate the system before selecting a pump.")
+        if self.selection_canvas is not None:
+            self.selection_canvas.get_tk_widget().destroy()
+            self.selection_canvas = None
+
     def _system_factor(self, key, us=None):
         if us is None:
             us = self.system_units.get() == "US"
@@ -396,7 +413,8 @@ class PumpEnergyApp(tk.Tk):
                         segment[key].set(f"{value * self._system_factor(key, current == 'US'):.10g}")
                     except ValueError:
                         pass
-            self.system_report = None
+            if previous != current:
+            self._invalidate_system_results()
         self._system_previous_units = current
         us = current == "US"
         units = {"dz": "ft" if us else "m", "dp": "psi" if us else "kPa",
@@ -408,7 +426,7 @@ class PumpEnergyApp(tk.Tk):
 
     def _toggle_system_fluid(self):
         self.system_widgets["ec"].configure(state="normal" if self.system_fluid.get() == "seawater" else "disabled")
-        self.system_report = None
+        self._invalidate_system_results()
 
     def add_system_segment(self):
         index = len(self.system_segments)
@@ -454,6 +472,10 @@ class PumpEnergyApp(tk.Tk):
         data["row_label"] = self.system_segments_frame.grid_slaves(row=row, column=0)[0]
         data["material"].trace_add("write", lambda *_ , d=data: self._segment_material_changed(d))
         self.system_segments.append(data)
+        for key in ("material", "length", "od", "sdr", "roughness", "transition", "transition_k"):
+            data[key].trace_add("write", self._invalidate_system_results)
+        for fitting_var in data["fittings"]:
+            fitting_var.trace_add("write", self._invalidate_system_results)
         self.system_segment_selector.configure(values=[str(i+1) for i in range(len(self.system_segments))])
         self.system_segment_selector.set(str(len(self.system_segments)))
         self._update_system_fitting_summary()
@@ -955,7 +977,7 @@ class PumpEnergyApp(tk.Tk):
             self._update_system_fitting_summary()
         self.system_segment_selector.set("1")
         self._update_system_fitting_summary()
-        self.system_report = None
+        self._invalidate_system_results()
         self.system_status.configure(text="Project loaded. Click Calculate System Curve to refresh results.")
 
     def export_system_txt(self):
@@ -966,8 +988,11 @@ class PumpEnergyApp(tk.Tk):
             defaultextension=".txt", filetypes=[("Text files", "*.txt")],
             initialfile="system_curve_report.txt")
         if path:
-            with open(path, "w", encoding="utf-8") as file:
-                file.write(self.system_report)
+            try:
+                with open(path, "w", encoding="utf-8") as file:
+                    file.write(self.system_report)
+            except OSError as exc:
+                messagebox.showerror("Export failed", str(exc))
 
     def calculate_pipe(self, key):
         side = "Inlet" if key == "D1" else "Outlet"

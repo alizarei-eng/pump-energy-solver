@@ -1058,7 +1058,6 @@ class PumpEnergyApp(tk.Tk):
             self.pipe_od[key].set("")
             self.pipe_sdr[key].set("11")
             self.pipe_grade[key].set("PE100")
-        self.clear_curve_rows()
         self.clear_results()
 
     def calculate(self):

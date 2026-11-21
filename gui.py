@@ -37,7 +37,7 @@ class PumpEnergyApp(tk.Tk):
         super().__init__()
         self.title("PUMP ENERGY SOLVER")
         self.geometry("1120x790")
-        self.minsize(780, 580)
+        self.minsize(650, 500)
         self.entries = {}
         self.pipe_widgets = {}
         self.pipe_types = {}
@@ -292,22 +292,48 @@ class PumpEnergyApp(tk.Tk):
             ttk.Entry(efficiency_frame, textvariable=var, width=12).grid(
                 row=row, column=1, padx=12, pady=5)
         curve_input = ttk.LabelFrame(selection_tab, text="Manual Pump Q-H Curve", padding=8)
-        curve_input.pack(fill="x", pady=8)
-        ttk.Label(curve_input, text="Reference RPM:").pack(side="left")
+        curve_input.pack(fill="x", pady=6)
+        rpm_row = ttk.Frame(curve_input)
+        rpm_row.pack(fill="x", pady=(0, 4))
+        ttk.Label(rpm_row, text="Reference RPM:").pack(side="left")
         self.selection_rpm = tk.StringVar(value="2900")
-        ttk.Entry(curve_input, textvariable=self.selection_rpm, width=9).pack(side="left", padx=6)
-        points_frame = ttk.Frame(curve_input)
-        points_frame.pack(side="left", padx=10)
-        ttk.Label(points_frame, text="Flow Q (m3/h)").grid(row=0, column=1, padx=4)
-        ttk.Label(points_frame, text="Head H (m)").grid(row=0, column=2, padx=4)
+        ttk.Entry(rpm_row, textvariable=self.selection_rpm, width=10).pack(side="left", padx=6)
+
+        # Fixed-height scrollable input table: adding points must not shrink the plot.
+        table_container = ttk.Frame(curve_input)
+        table_container.pack(fill="x", expand=False)
+        points_canvas = tk.Canvas(table_container, height=120, highlightthickness=0)
+        points_scroll = ttk.Scrollbar(table_container, orient="vertical",
+                                      command=points_canvas.yview)
+        points_canvas.configure(yscrollcommand=points_scroll.set)
+        points_scroll.pack(side="right", fill="y")
+        points_canvas.pack(side="left", fill="both", expand=True)
+        points_frame = ttk.Frame(points_canvas)
+        points_window = points_canvas.create_window((0, 0), window=points_frame, anchor="nw")
+        points_frame.bind("<Configure>", lambda event: points_canvas.configure(
+            scrollregion=points_canvas.bbox("all")))
+        points_canvas.bind("<Configure>", lambda event: points_canvas.itemconfigure(
+            points_window, width=event.width))
+        ttk.Label(points_frame, text="Point").grid(row=0, column=0, sticky="w", padx=4)
+        ttk.Label(points_frame, text="Flow Q (m3/h)").grid(row=0, column=1, sticky="w", padx=4)
+        ttk.Label(points_frame, text="Head H (m)").grid(row=0, column=2, sticky="w", padx=4)
+        points_frame.columnconfigure(1, weight=1)
+        points_frame.columnconfigure(2, weight=1)
         self.selection_point_rows = []
+
         def add_point():
             row = len(self.selection_point_rows) + 1
             q_var, h_var = tk.StringVar(), tk.StringVar()
-            ttk.Label(points_frame, text=f"Point {row}").grid(row=row, column=0, padx=4, pady=2)
-            ttk.Entry(points_frame, textvariable=q_var, width=12).grid(row=row, column=1, padx=4, pady=2)
-            ttk.Entry(points_frame, textvariable=h_var, width=12).grid(row=row, column=2, padx=4, pady=2)
+            ttk.Label(points_frame, text=f"Point {row}").grid(
+                row=row, column=0, sticky="w", padx=4, pady=2)
+            ttk.Entry(points_frame, textvariable=q_var, width=14).grid(
+                row=row, column=1, sticky="ew", padx=4, pady=2)
+            ttk.Entry(points_frame, textvariable=h_var, width=14).grid(
+                row=row, column=2, sticky="ew", padx=4, pady=2)
             self.selection_point_rows.append((q_var, h_var))
+            points_canvas.update_idletasks()
+            points_canvas.yview_moveto(1.0)
+
         def remove_point():
             if len(self.selection_point_rows) <= 2:
                 return
@@ -315,10 +341,13 @@ class PumpEnergyApp(tk.Tk):
             for widget in points_frame.grid_slaves(row=row):
                 widget.destroy()
             self.selection_point_rows.pop()
+            points_canvas.configure(scrollregion=points_canvas.bbox("all"))
+
         buttons_frame = ttk.Frame(curve_input)
-        buttons_frame.pack(side="left", padx=8)
-        ttk.Button(buttons_frame, text="Add Point", command=add_point).pack(pady=3)
-        ttk.Button(buttons_frame, text="Remove Point", command=remove_point).pack(pady=3)
+        buttons_frame.pack(fill="x", pady=(5, 0))
+        ttk.Button(buttons_frame, text="Add Point", command=add_point).pack(
+            side="left", padx=(0, 8))
+        ttk.Button(buttons_frame, text="Remove Point", command=remove_point).pack(side="left")
         add_point()
         add_point()
         add_point()

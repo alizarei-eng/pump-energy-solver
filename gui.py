@@ -545,11 +545,8 @@ class PumpEnergyApp(tk.Tk):
         q, h, ph = self.pump_selection_duty
         shaft = ph / pump_eta
         electric = shaft / motor_eta
-        self.selection_result_label.configure(text=(
-            f"Flow: {q:.4f} m3/h    System head: {h:.4f} m\\n"
-            f"Hydraulic power: {ph:.4f} kW\\n"
-            f"Required pump shaft power: {shaft:.4f} kW\\n"
-            f"Estimated electrical input power: {electric:.4f} kW"))
+        self.selection_result_label.configure(
+            text=f"Total electrical input power: {electric:.2f} kW")
         
     def calculate_system_curve(self):
         try:

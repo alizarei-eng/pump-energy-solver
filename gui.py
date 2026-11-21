@@ -51,6 +51,7 @@ class PumpEnergyApp(tk.Tk):
         self.system_vars = {}
         self.system_canvas = None
         self.system_report = None
+        self.pump_selection_duty = None
         self.system_sensitivity_inputs = None
         self.system_segments = []
         self.system_selected_segment = tk.IntVar(value=0)
@@ -72,7 +73,7 @@ class PumpEnergyApp(tk.Tk):
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=16, pady=8)
         tab_names = ["Flow & Geometry", "Pressure & Elevation", "Fluid & Losses",
-                     "Pump Performance", "Pump Q-H Curve", "System H-Q Curve", "Results & Report"]
+                     "Pump Performance", "Pump Q-H Curve", "System H-Q Curve", "Pump Selection", "Results & Report"]
         self.tab_frames = {}
         for name in tab_names:
             tab = ttk.Frame(self.tabs, padding=16)
@@ -272,6 +273,28 @@ class PumpEnergyApp(tk.Tk):
         self._update_system_units()
         self._toggle_system_fluid()
         self.add_system_segment()
+        selection_tab = self.tab_frames["Pump Selection"]
+        ttk.Label(selection_tab, text="Single pump sizing | System H-Q Curve duty at maximum flow",
+                  font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 12))
+        self.selection_duty_label = ttk.Label(selection_tab,
+            text="Calculate System H-Q Curve first to import flow, head and hydraulic power.")
+        self.selection_duty_label.pack(anchor="w", pady=(0, 12))
+        efficiency_frame = ttk.LabelFrame(selection_tab, text="User-supplied efficiencies (%)", padding=12)
+        efficiency_frame.pack(anchor="nw", fill="x")
+        self.selection_pump_eta = tk.StringVar(value="75")
+        self.selection_motor_eta = tk.StringVar(value="93")
+        for row, (label, var) in enumerate((("Pump efficiency", self.selection_pump_eta),
+                                             ("Motor efficiency", self.selection_motor_eta))):
+            ttk.Label(efficiency_frame, text=label).grid(row=row, column=0, sticky="w", pady=5)
+            ttk.Entry(efficiency_frame, textvariable=var, width=12).grid(
+                row=row, column=1, padx=12, pady=5)
+        ttk.Button(selection_tab, text="Calculate pump & motor power",
+                   command=self.calculate_pump_selection).pack(anchor="w", pady=12)
+        self.selection_result_label = ttk.Label(selection_tab, text="No sizing calculation yet.",
+            font=("Segoe UI", 11), justify="left")
+        self.selection_result_label.pack(anchor="w", pady=6)
+        ttk.Label(selection_tab, text="Preliminary sizing only. Check manufacturer Q-H, efficiency and shaft-power curves.",
+                  wraplength=750).pack(anchor="w", pady=12)
         results_tab = self.tab_frames["Results & Report"]
         controls = ttk.Frame(results_tab, padding=(0, 0, 0, 10))
         controls.pack(fill="x")
@@ -503,6 +526,31 @@ class PumpEnergyApp(tk.Tk):
         self._update_system_fitting_summary()
         self.system_report = None
 
+    def calculate_pump_selection(self):
+        """Size a single pump using the latest calculated system duty point."""
+        if self.pump_selection_duty is None:
+            messagebox.showinfo("Pump Selection", "Calculate System H-Q Curve first.")
+            return
+        try:
+            def efficiency(var, name):
+                value = float(var.get().strip().replace(",", "."))
+                if not math.isfinite(value) or not 0 < value <= 100:
+                    raise ValueError(f"{name} must be greater than 0 and at most 100%.")
+                return value / 100.0
+            pump_eta = efficiency(self.selection_pump_eta, "Pump efficiency")
+            motor_eta = efficiency(self.selection_motor_eta, "Motor efficiency")
+        except ValueError as exc:
+            messagebox.showerror("Pump Selection", str(exc))
+            return
+        q, h, ph = self.pump_selection_duty
+        shaft = ph / pump_eta
+        electric = shaft / motor_eta
+        self.selection_result_label.configure(text=(
+            f"Flow: {q:.4f} m3/h    System head: {h:.4f} m\\n"
+            f"Hydraulic power: {ph:.4f} kW\\n"
+            f"Required pump shaft power: {shaft:.4f} kW\\n"
+            f"Estimated electrical input power: {electric:.4f} kW"))
+        
     def calculate_system_curve(self):
         try:
             us = self.system_units.get() == "US"
@@ -638,6 +686,11 @@ class PumpEnergyApp(tk.Tk):
                    "Gradual transition K must be supplied by user; unselected changes omit transition loss.",
                    "For non-PE pipes, diameter input is the INTERNAL bore, not outside diameter.",
                    "Manufacturer fitting K and roughness should replace indicative reference values for final design."]
+        self.pump_selection_duty = (qmax, heads[-1], powers_kw[-1])
+        self.selection_duty_label.configure(text=(
+            f"Imported duty: Q={qmax:.4f} m3/h | H={heads[-1]:.4f} m | "
+            f"Hydraulic power={powers_kw[-1]:.4f} kW"))
+        self.selection_result_label.configure(text="Duty point updated. Calculate to apply efficiencies.")
         self.system_sensitivity_inputs = (segments, transition_losses, dz, dp, rho, nu, qmax)
         self.system_report = "\n".join(report) + "\n"
         qfactor = 4.402867539 if us else 1.0

@@ -52,6 +52,8 @@ class PumpEnergyApp(tk.Tk):
         self.system_canvas = None
         self.system_report = None
         self.pump_selection_duty = None
+        self.pump_selection_curve = None
+        self.selection_canvas = None
         self.system_sensitivity_inputs = None
         self.system_segments = []
         self.system_selected_segment = tk.IntVar(value=0)
@@ -293,6 +295,8 @@ class PumpEnergyApp(tk.Tk):
         self.selection_result_label = ttk.Label(selection_tab, text="No sizing calculation yet.",
             font=("Segoe UI", 11), justify="left")
         self.selection_result_label.pack(anchor="w", pady=6)
+        self.selection_plot_frame = ttk.LabelFrame(selection_tab, text="Estimated Electrical Power vs Flow", padding=4)
+        self.selection_plot_frame.pack(fill="both", expand=True, pady=(8, 4))
         ttk.Label(selection_tab, text="Preliminary sizing only. Check manufacturer Q-H, efficiency and shaft-power curves.",
                   wraplength=750).pack(anchor="w", pady=12)
         results_tab = self.tab_frames["Results & Report"]
@@ -547,6 +551,28 @@ class PumpEnergyApp(tk.Tk):
         electric = shaft / motor_eta
         self.selection_result_label.configure(
             text=f"Total electrical input power: {electric:.2f} kW")
+        if self.pump_selection_curve is not None:
+            flows, powers = self.pump_selection_curve
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            fig = Figure(figsize=(7, 3.2), dpi=100)
+            ax = fig.add_subplot(111)
+            ax.plot(flows, [p / (pump_eta * motor_eta) for p in powers],
+                    color="tab:blue", linewidth=2)
+            ax.scatter([q], [electric], color="tab:red", zorder=4,
+                       label=f"Design duty: {q:.2f} m3/h, {electric:.2f} kW")
+            ax.set_xlabel("Flow rate (m3/h)")
+            ax.set_ylabel("Estimated electrical input power (kW)")
+            ax.set_title("Constant-efficiency estimate (not manufacturer pump curve)")
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc="best")
+            fig.tight_layout()
+            if self.selection_canvas is not None:
+                self.selection_canvas.get_tk_widget().destroy()
+            self.selection_canvas = FigureCanvasTkAgg(fig, master=self.selection_plot_frame)
+            self.selection_canvas.draw()
+            self.selection_canvas.get_tk_widget().pack(fill="both", expand=True)
+
         
     def calculate_system_curve(self):
         try:
@@ -684,6 +710,7 @@ class PumpEnergyApp(tk.Tk):
                    "For non-PE pipes, diameter input is the INTERNAL bore, not outside diameter.",
                    "Manufacturer fitting K and roughness should replace indicative reference values for final design."]
         self.pump_selection_duty = (qmax, heads[-1], powers_kw[-1])
+        self.pump_selection_curve = (list(flows), list(powers_kw))
         self.selection_duty_label.configure(text=(
             f"Imported duty: Q={qmax:.4f} m3/h | H={heads[-1]:.4f} m | "
             f"Hydraulic power={powers_kw[-1]:.4f} kW"))

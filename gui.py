@@ -165,6 +165,11 @@ class PumpEnergyApp(tk.Tk):
                      values=list(PRESSURE_TO_KPA), state="readonly", width=8).pack(side="left")
         ttk.Label(pressure_settings, text="Applies to P1, P2 and dP.").pack(side="left", padx=14)
 
+        # Remove this redundant tab from the visible notebook while retaining
+        # its Entry widgets, pressure unit state, solver inputs, and report logic.
+        # ttk.Notebook.hide preserves the tab and all its child widgets.
+        self.tabs.hide(self.tab_frames["Pressure & Elevation"])
+
         fluid_tab = self.tab_frames["Fluid & Losses"]
         fluid_frame = ttk.LabelFrame(fluid_tab, text="Fluid properties (automatic density)", padding=12)
         fluid_frame.pack(fill="x", pady=12)

@@ -7,6 +7,7 @@ from datetime import datetime
 from pump_energy import FIELDS, NONNEGATIVE, POSITIVE, G, solve
 from water_properties import calculate_water_properties
 from hydraulics.npsh import calculate_npsh
+from hydraulics.pipe_catalog import CATALOGS, size_pipes
 from hydraulics.system_curve import calculate_system_curve as compute_system_curve
 from plotting.system_plot import build_system_figure
 from hydraulics.sensitivity import analyze_sensitivity
@@ -82,7 +83,7 @@ class PumpEnergyApp(tk.Tk):
 
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=16, pady=8)
-        tab_names = ["Flow & Geometry", "Pressure & Elevation", "Fluid & Losses",
+        tab_names = ["Required Pipe Diameter", "Pressure & Elevation", "Fluid & Losses",
                      "Pump Performance", "System H-Q Curve", "Pump Selection", "Results & Report"]
         self.tab_frames = {}
         for name in tab_names:
@@ -91,7 +92,7 @@ class PumpEnergyApp(tk.Tk):
             self.tab_frames[name] = tab
 
         groups = {
-            "Flow & Geometry": ["Q", "V1", "V2"],
+            "Required Pipe Diameter": ["Q", "V1", "V2"],
             "Pressure & Elevation": ["P1", "P2", "dP", "dz"],
             "Fluid & Losses": ["hL"],
             "Pump Performance": ["Hp", "eta", "Ph", "Ps"],
@@ -110,7 +111,7 @@ class PumpEnergyApp(tk.Tk):
                     row=row, column=2, sticky="w", padx=10, pady=7)
                 self.entries[key] = entry
 
-        geometry_tab = self.tab_frames["Flow & Geometry"]
+        geometry_tab = self.tab_frames["Required Pipe Diameter"]
         for section, key in (("Inlet", "D1"), ("Outlet", "D2")):
             pipe_frame = ttk.LabelFrame(geometry_tab, text=f"{section} pipe geometry", padding=10)
             pipe_frame.pack(fill="x", pady=7)
@@ -149,6 +150,12 @@ class PumpEnergyApp(tk.Tk):
             result = ttk.Label(pipe_frame, text="Enter OD and SDR, then calculate.", wraplength=610)
             result.grid(row=3, column=1, columnspan=3, padx=5, pady=7, sticky="w")
             self.pipe_result_labels[key] = result
+
+        # Keep legacy widgets alive for existing pump-energy calculations,
+        # but replace their visible presentation with catalog-driven sizing.
+        for widget in geometry_tab.winfo_children():
+            widget.pack_forget()
+        self._build_catalog_sizing(geometry_tab)
 
         pressure_tab = self.tab_frames["Pressure & Elevation"]
         pressure_settings = ttk.LabelFrame(pressure_tab, text="Pressure units", padding=12)
@@ -1171,6 +1178,103 @@ class PumpEnergyApp(tk.Tk):
                     file.write(self.system_report)
             except OSError as exc:
                 messagebox.showerror("Export failed", str(exc))
+
+    def _build_catalog_sizing(self, parent):
+        """First tab: select material, then standard and size series."""
+        ttk.Label(parent, text="Required Pipe Diameter | Catalog-Driven Pipe Sizing",
+                  font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 8))
+        ttk.Label(parent, text="Dimensions are indicative until verified against the specified standard and supplier. "
+                  "Pressure rating, temperature, corrosion and pipe availability require separate approval.",
+                  wraplength=950).pack(anchor="w")
+        form = ttk.LabelFrame(parent, text="Material, catalog and design conditions", padding=12)
+        form.pack(fill="x", pady=10)
+        fields = [
+            ("material", "Pipe material", "HDPE / PE"),
+            ("standard", "Catalog / standard", "ISO 4427"),
+            ("series", "SDR / Schedule", "11"),
+            ("flow", "Design flow [m3/h]", "300"),
+            ("velocity", "Maximum velocity [m/s]", "2"),
+            ("length", "Pipe length [m]", "100"),
+            ("roughness", "Roughness [mm]", "0.0015"),
+            ("k", "Total fittings K", "2"),
+        ]
+        values = {key: tk.StringVar(value=default) for key,_,default in fields}
+        self.catalog_sizing_vars = values
+        widgets = {}
+        for i,(key,label,default) in enumerate(fields):
+            row, col = divmod(i, 2)
+            ttk.Label(form, text=label).grid(row=row, column=col*2, sticky="w", padx=5, pady=5)
+            if key in ("material", "standard", "series"):
+                widget = ttk.Combobox(form, textvariable=values[key], state="readonly", width=25)
+            else:
+                widget = ttk.Entry(form, textvariable=values[key], width=27)
+            widget.grid(row=row, column=col*2+1, sticky="w", padx=5, pady=5)
+            widgets[key] = widget
+        def material_changed(*_):
+            material = values["material"].get()
+            standards = list(CATALOGS[material])
+            widgets["standard"]["values"] = standards
+            values["standard"].set(standards[0])
+        def standard_changed(*_):
+            spec = CATALOGS[values["material"].get()][values["standard"].get()]
+            widgets["series"]["values"] = spec["series"]
+            values["series"].set(spec["series"][0] if spec["series"] else "")
+        values["material"].trace_add("write", material_changed)
+        values["standard"].trace_add("write", standard_changed)
+        widgets["material"]["values"] = list(CATALOGS)
+        material_changed()
+        controls = ttk.Frame(parent)
+        controls.pack(fill="x", pady=5)
+        status = tk.Label(parent, text="Enter conditions and calculate.", anchor="w",
+                          bg="#e5e7eb", fg="#111827", padx=10, pady=8)
+        status.pack(fill="x", pady=5)
+        columns = ("size", "od", "wall", "id", "velocity", "loss", "check")
+        table = ttk.Treeview(parent, columns=columns, show="headings", height=13)
+        for key,label,width in (
+            ("size","Nominal size",110),("od","OD [mm]",105),("wall","Wall [mm]",105),
+            ("id","ID [mm]",105),("velocity","Velocity [m/s]",130),
+            ("loss","Head loss [m]",130),("check","Velocity check",145)):
+            table.heading(key,text=label)
+            table.column(key,width=width,anchor="center")
+        table.tag_configure("pass", background="#dcfce7")
+        table.tag_configure("fail", background="#fecaca")
+        table.pack(fill="both",expand=True,pady=5)
+        def calculate():
+            for item in table.get_children():
+                table.delete(item)
+            try:
+                material,standard,series=(values[k].get() for k in ("material","standard","series"))
+                if not series:
+                    status.configure(text="YELLOW | This catalog needs manufacturer dimensional tables. No sizes fabricated.",
+                                     bg="#fef08a")
+                    return
+                q=float(values["flow"].get())
+                required,rows=size_pipes(material,standard,series,q,float(values["velocity"].get()),
+                                         float(values["length"].get()),float(values["roughness"].get()),
+                                         float(values["k"].get()))
+                for row in rows:
+                    table.insert("", "end", values=(row["designation"],f'{row["od_mm"]:.1f}',
+                        f'{row["wall_mm"]:.2f}',f'{row["id_mm"]:.2f}',f'{row["velocity_m_s"]:.2f}',
+                        f'{row["head_loss_m"]:.2f}',"PASS" if row["meets_velocity"] else "HIGH VELOCITY"),
+                        tags=("pass" if row["meets_velocity"] else "fail",))
+                eligible=[row for row in rows if row["meets_velocity"]]
+                if eligible:
+                    best=eligible[0]
+                    status.configure(text=f'GREEN | Required ID = {required:.1f} mm | First velocity-compliant: '
+                                     f'{best["designation"]} {series} (ID {best["id_mm"]:.1f} mm). '
+                                     'NOT pressure-approved; verify source catalog.',
+                                     bg="#bbf7d0")
+                    # Share duty flow with the original pump-energy engine.
+                    self.entries["Q"].delete(0,"end")
+                    self.entries["Q"].insert(0,str(q))
+                else:
+                    status.configure(text=f'RED | Required ID = {required:.1f} mm; no listed size meets the target velocity.',
+                                     bg="#fecaca")
+            except Exception as exc:
+                status.configure(text=f'ERROR | {exc}',bg="#fecaca")
+                messagebox.showerror("Pipe sizing",str(exc))
+        ttk.Button(controls,text="Calculate & Compare Sizes",command=calculate).pack(side="left",padx=5)
+        ttk.Label(controls,text="Green = velocity only; pressure rating not checked.").pack(side="left",padx=10)
 
     def calculate_pipe(self, key):
         side = "Inlet" if key == "D1" else "Outlet"

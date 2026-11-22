@@ -1693,7 +1693,8 @@ def add_npsh_tabs(app):
             ax = fig.add_subplot(111)
             ax.plot(qs, available, label="NPSHa (system)")
             ax.plot(qvalid, required, label="NPSHr (manufacturer points)" if use_points else "NPSHr (constant)")
-            if use_points:\n                ax.scatter(xp, yp, marker="o", label="Manufacturer points")
+            if use_points:
+                ax.scatter(xp, yp, marker="o", label="Manufacturer points")
             ax.fill_between(qvalid, av, required, where=margin < 0, alpha=0.2, label="NPSHa < NPSHr")
             ax.set(xlabel="Flow [m3/h]", ylabel="NPSH [m]")
             ax.grid(True)

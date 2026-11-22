@@ -1410,6 +1410,21 @@ class PumpEnergyApp(tk.Tk):
         messagebox.showinfo("Export complete", f"Report saved to:\n{path}")
 
 
+NPSH_FIELDS = [
+    ("water_type", "Water type", "seawater"),
+    ("temperature_C", "Temperature [C]", "30"),
+    ("ec_ms_cm", "In-situ EC [mS/cm]", "58"),
+    ("flow_m3h", "Flow [m3/h]", "150"),
+    ("inside_diameter_mm", "Suction internal diameter [mm]", "200"),
+    ("length_m", "Suction length [m]", "10"),
+    ("roughness_mm", "Roughness [mm]", "0.0015"),
+    ("fittings_k", "Total fittings K", "1"),
+    ("static_height_m", "Surface elevation - pump inlet [m]", "7"),
+    ("surface_pressure_bar_abs", "Surface pressure [bar ABS]", "1.01325"),
+    ("npshr_m", "Pump NPSHr [m]", "4"),
+    ("known_loss_m", "Known suction loss [m] (optional)", ""),
+]
+
 def add_npsh_tabs(app):
     calc = ttk.Frame(app.tabs, padding=12)
     analysis = ttk.Frame(app.tabs, padding=12)
@@ -1418,7 +1433,7 @@ def add_npsh_tabs(app):
     vars = {}
     grid = ttk.Frame(calc)
     grid.pack(anchor="nw", fill="x")
-    for i,(key,label,default) in enumerate(FIELDS):
+    for i,(key,label,default) in enumerate(NPSH_FIELDS):
         ttk.Label(grid,text=label).grid(row=i//2,column=(i%2)*2,sticky="w",padx=5,pady=5)
         var=tk.StringVar(value=default); vars[key]=var
         if key=="water_type":

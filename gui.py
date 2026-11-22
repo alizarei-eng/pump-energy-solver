@@ -1704,7 +1704,8 @@ def add_npsh_tabs(app):
             canvas.get_tk_widget().pack(fill="both", expand=True)
             current_q = d["flow_m3h"]
             messages = [
-                "ENGINEERING INTERPRETATION",\n                "NPSHr input: manufacturer curve" if use_points else f"NPSHr input: constant {yp[0]:.3f} m (assumed independent of Q)",
+                "ENGINEERING INTERPRETATION",
+                "NPSHr input: manufacturer curve" if use_points else f"NPSHr input: constant {yp[0]:.3f} m (assumed independent of Q)",
                 f"Manufacturer data range: {xp[0]:.2f} to {xp[-1]:.2f} m3/h (no extrapolation).",
                 f"Comparison criterion: NPSHa/NPSHr >= {threshold:.2f} (user-defined; verify OEM).",
             ]
@@ -1735,7 +1736,9 @@ def add_npsh_tabs(app):
                 messages.append("At some compared flows, cavitation risk is elevated: NPSHa <= NPSHr.")
             if np.any((margin > 0) & (target_margin < 0)):
                 messages.append("Some flows have positive NPSH margin but fail the chosen safety ratio.")
-            if not use_points:\n                messages.append("Constant NPSHr is a simplified assumption; obtain the OEM Q-NPSHr curve for reliable range assessment.")\n            messages.append("NPSHr is commonly NPSH3; a positive margin does not guarantee cavitation-free operation.")
+            if not use_points:
+                messages.append("Constant NPSHr is a simplified assumption; obtain the OEM Q-NPSHr curve for reliable range assessment.")
+            messages.append("NPSHr is commonly NPSH3; a positive margin does not guarantee cavitation-free operation.")
             messages.append("Higher flow raises suction losses. Check suction restrictions, fluid temperature and inlet pressure.")
             if d["known_loss_m"] is not None:
                 messages.append("WARNING: Fixed entered suction loss was used for all flows; this is not a physical system curve.")

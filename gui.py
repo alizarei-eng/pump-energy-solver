@@ -1441,6 +1441,16 @@ def add_npsh_tabs(app):
                          state="readonly",width=17).grid(row=i//2,column=(i%2)*2+1,padx=5)
         else:
             ttk.Entry(grid,textvariable=var,width=18).grid(row=i//2,column=(i%2)*2+1,padx=5)
+    criteria = ttk.Frame(calc)
+    criteria.pack(fill="x", pady=(8, 3))
+    ttk.Label(criteria, text="Minimum NPSHa / NPSHr for green (user criterion):").pack(side="left")
+    min_ratio = tk.StringVar(value="1.30")
+    ttk.Entry(criteria, textvariable=min_ratio, width=8).pack(side="left", padx=8)
+    ttk.Label(criteria, text="Not a universal manufacturer limit").pack(side="left")
+    status_banner = tk.Label(calc, text="NOT CALCULATED", bg="#e5e7eb",
+                             fg="#111827", font=("Segoe UI", 12, "bold"),
+                             anchor="w", padx=12, pady=10)
+    status_banner.pack(fill="x", pady=(4, 8))
     report=tk.Text(calc,height=13,wrap="word")
     report.pack(fill="both",expand=True,pady=8)
     def inputs():
@@ -1450,6 +1460,23 @@ def add_npsh_tabs(app):
     def calc_result():
         try:
             r=calculate_npsh(**inputs())
+            threshold = float(min_ratio.get())
+            if not math.isfinite(threshold) or threshold <= 1:
+                raise ValueError("Green threshold must be a finite number greater than 1.")
+            margin = r["margin_m"]
+            ratio = r["ratio"]
+            if margin <= 0:
+                state, color = "RED | INSUFFICIENT NPSH - DO NOT ACCEPT", "#fecaca"
+            elif ratio is None:
+                state, color = "YELLOW | NPSHr is zero; ratio cannot be evaluated", "#fef08a"
+            elif ratio < threshold:
+                state, color = "YELLOW | POSITIVE BUT BELOW SELECTED MARGIN", "#fef08a"
+            else:
+                state, color = "GREEN | MEETS SELECTED NPSH MARGIN (VERIFY OEM)", "#bbf7d0"
+            status_banner.configure(text=f"{state}   |   Margin: {margin:.2f} m   |   Ratio: {ratio if ratio is not None else 'N/A'}",
+                                    bg=color)
+            r["assessment"] = state
+            r["minimum_ratio_criterion"] = threshold
             report.delete("1.0","end")
             report.insert("end","NPSHa = (P_surface,abs - Pv)/(rho*g) + (z_surface - z_pump) - h_loss\n")
             report.insert("end","h_loss = (f*L/D + sum K)*V^2/(2*g)\n\n")
@@ -1457,6 +1484,7 @@ def add_npsh_tabs(app):
                 report.insert("end",f"{k}: {v}\n")
             return r
         except Exception as exc:
+            status_banner.configure(text="CALCULATION ERROR - CHECK INPUTS", bg="#fecaca")
             messagebox.showerror("NPSH calculation",str(exc))
     bar=ttk.Frame(calc);bar.pack(fill="x")
     ttk.Button(bar,text="Calculate NPSH",command=calc_result).pack(side="left",padx=5)

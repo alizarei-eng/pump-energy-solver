@@ -1523,19 +1523,53 @@ def add_npsh_tabs(app):
 
     body = ttk.Frame(analysis)
     body.pack(fill="both", expand=True)
-    curve_panel = ttk.LabelFrame(body, text="Manufacturer NPSHr curve points", padding=6)
+    curve_panel = ttk.LabelFrame(body, text="Manufacturer NPSHr input", padding=6)
     curve_panel.pack(side="left", fill="y", padx=(0, 8))
-    ttk.Label(curve_panel, text="Q [m3/h]").grid(row=0, column=0)
-    ttk.Label(curve_panel, text="NPSHr [m]").grid(row=0, column=1)
+    mode = tk.StringVar(value="points")
+    ttk.Radiobutton(curve_panel, text="Manufacturer Q-NPSHr points",
+                    variable=mode, value="points").pack(anchor="w")
+    ttk.Radiobutton(curve_panel, text="Constant NPSHr",
+                    variable=mode, value="constant").pack(anchor="w")
+    fixed_box = ttk.Frame(curve_panel)
+    fixed_box.pack(fill="x", pady=(4, 6))
+    ttk.Label(fixed_box, text="NPSHr [m]").pack(side="left")
+    fixed_npshr = tk.StringVar(value=str(vars["npshr_m"].get()))
+    fixed_entry = ttk.Entry(fixed_box, textvariable=fixed_npshr, width=10)
+    fixed_entry.pack(side="left", padx=5)
+
+    points_box = ttk.Frame(curve_panel)
+    points_box.pack(fill="x")
+    ttk.Label(points_box, text="Q [m3/h]").pack(side="left", padx=(2, 28))
+    ttk.Label(points_box, text="NPSHr [m]").pack(side="left")
+    scroll_holder = ttk.Frame(curve_panel)
+    scroll_holder.pack(fill="x")
+    points_canvas = tk.Canvas(scroll_holder, width=230, height=145, highlightthickness=0)
+    points_scroll = ttk.Scrollbar(scroll_holder, orient="vertical", command=points_canvas.yview)
+    points_canvas.configure(yscrollcommand=points_scroll.set)
+    points_canvas.pack(side="left")
+    points_scroll.pack(side="left", fill="y")
+    points_frame = ttk.Frame(points_canvas)
+    window = points_canvas.create_window((0, 0), window=points_frame, anchor="nw")
+    points_frame.bind("<Configure>", lambda _e: points_canvas.configure(
+        scrollregion=points_canvas.bbox("all")))
+    points_canvas.bind("<Configure>", lambda e: points_canvas.itemconfigure(window, width=e.width))
+    def wheel_points(event):
+        if mode.get() == "points":
+            direction = -1 if getattr(event, "delta", 0) > 0 else 1
+            points_canvas.yview_scroll(direction, "units")
+    points_canvas.bind("<MouseWheel>", wheel_points)
+    points_frame.bind("<MouseWheel>", wheel_points)
     point_rows = []
     def add_point(q="", h=""):
-        idx = len(point_rows) + 1
+        idx = len(point_rows)
         qv, hv = tk.StringVar(value=str(q)), tk.StringVar(value=str(h))
-        qw = ttk.Entry(curve_panel, textvariable=qv, width=11)
-        hw = ttk.Entry(curve_panel, textvariable=hv, width=11)
+        qw = ttk.Entry(points_frame, textvariable=qv, width=12)
+        hw = ttk.Entry(points_frame, textvariable=hv, width=12)
         qw.grid(row=idx, column=0, padx=2, pady=2)
         hw.grid(row=idx, column=1, padx=2, pady=2)
         point_rows.append((qv, hv, qw, hw))
+        points_canvas.update_idletasks()
+        points_canvas.yview_moveto(1.0)
     def remove_point():
         if len(point_rows) <= 2:
             return
@@ -1558,9 +1592,11 @@ def add_npsh_tabs(app):
     for _ in range(3):
         add_point()
     point_actions = ttk.Frame(curve_panel)
-    point_actions.grid(row=1000, column=0, columnspan=2, sticky="ew", pady=4)
-    ttk.Button(point_actions, text="+ Point", command=add_point).pack(side="left")
-    ttk.Button(point_actions, text="- Point", command=remove_point).pack(side="left")
+    point_actions.pack(fill="x", pady=4)
+    add_btn = ttk.Button(point_actions, text="+ Point", command=add_point)
+    add_btn.pack(side="left")
+    remove_btn = ttk.Button(point_actions, text="- Point", command=remove_point)
+    remove_btn.pack(side="left")
     def save_curve():
         try:
             data = manufacturer_points()
@@ -1588,8 +1624,25 @@ def add_npsh_tabs(app):
             manufacturer_points()
         except Exception as exc:
             messagebox.showerror("Manufacturer curve", str(exc))
-    ttk.Button(point_actions, text="Save", command=save_curve).pack(side="left")
-    ttk.Button(point_actions, text="Load", command=load_curve).pack(side="left")
+    save_btn = ttk.Button(point_actions, text="Save", command=save_curve)
+    save_btn.pack(side="left")
+    load_btn = ttk.Button(point_actions, text="Load", command=load_curve)
+    load_btn.pack(side="left")
+    def toggle_mode(*_):
+        use_points = mode.get() == "points"
+        fixed_entry.configure(state="disabled" if use_points else "normal")
+        for w in (add_btn, remove_btn, save_btn, load_btn):
+            w.configure(state="normal" if use_points else "disabled")
+        for _, _, qw, hw in point_rows:
+            qw.configure(state="normal" if use_points else "disabled")
+        if use_points:
+            scroll_holder.pack(fill="x", before=point_actions)
+            points_box.pack(fill="x", before=scroll_holder)
+        else:
+            points_box.pack_forget()
+            scroll_holder.pack_forget()
+    mode.trace_add("write", toggle_mode)
+    toggle_mode()
 
     display = ttk.Frame(body)
     display.pack(side="left", fill="both", expand=True)
@@ -1639,8 +1692,8 @@ def add_npsh_tabs(app):
             fig = Figure(figsize=(7, 4), dpi=100)
             ax = fig.add_subplot(111)
             ax.plot(qs, available, label="NPSHa (system)")
-            ax.plot(qvalid, required, label="NPSHr (manufacturer, interpolated)")
-            ax.scatter(xp, yp, marker="o", label="Manufacturer points")
+            ax.plot(qvalid, required, label="NPSHr (manufacturer points)" if use_points else "NPSHr (constant)")
+            if use_points:\n                ax.scatter(xp, yp, marker="o", label="Manufacturer points")
             ax.fill_between(qvalid, av, required, where=margin < 0, alpha=0.2, label="NPSHa < NPSHr")
             ax.set(xlabel="Flow [m3/h]", ylabel="NPSH [m]")
             ax.grid(True)
@@ -1650,7 +1703,7 @@ def add_npsh_tabs(app):
             canvas.get_tk_widget().pack(fill="both", expand=True)
             current_q = d["flow_m3h"]
             messages = [
-                "ENGINEERING INTERPRETATION",
+                "ENGINEERING INTERPRETATION",\n                "NPSHr input: manufacturer curve" if use_points else f"NPSHr input: constant {yp[0]:.3f} m (assumed independent of Q)",
                 f"Manufacturer data range: {xp[0]:.2f} to {xp[-1]:.2f} m3/h (no extrapolation).",
                 f"Comparison criterion: NPSHa/NPSHr >= {threshold:.2f} (user-defined; verify OEM).",
             ]
@@ -1681,7 +1734,7 @@ def add_npsh_tabs(app):
                 messages.append("At some compared flows, cavitation risk is elevated: NPSHa <= NPSHr.")
             if np.any((margin > 0) & (target_margin < 0)):
                 messages.append("Some flows have positive NPSH margin but fail the chosen safety ratio.")
-            messages.append("NPSHr is commonly NPSH3; a positive margin does not guarantee cavitation-free operation.")
+            if not use_points:\n                messages.append("Constant NPSHr is a simplified assumption; obtain the OEM Q-NPSHr curve for reliable range assessment.")\n            messages.append("NPSHr is commonly NPSH3; a positive margin does not guarantee cavitation-free operation.")
             messages.append("Higher flow raises suction losses. Check suction restrictions, fluid temperature and inlet pressure.")
             if d["known_loss_m"] is not None:
                 messages.append("WARNING: Fixed entered suction loss was used for all flows; this is not a physical system curve.")

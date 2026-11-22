@@ -83,7 +83,7 @@ class PumpEnergyApp(tk.Tk):
 
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=16, pady=8)
-        tab_names = ["Required Pipe Diameter", "Pressure & Elevation", "Fluid & Losses",
+        tab_names = ["Pipe Diameter", "Pressure & Elevation", "Fluid & Losses",
                      "Pump Performance", "System H-Q Curve", "Pump Selection", "Results & Report"]
         self.tab_frames = {}
         for name in tab_names:
@@ -92,7 +92,7 @@ class PumpEnergyApp(tk.Tk):
             self.tab_frames[name] = tab
 
         groups = {
-            "Required Pipe Diameter": ["Q", "V1", "V2"],
+            "Pipe Diameter": ["Q", "V1", "V2"],
             "Pressure & Elevation": ["P1", "P2", "dP", "dz"],
             "Fluid & Losses": ["hL"],
             "Pump Performance": ["Hp", "eta", "Ph", "Ps"],
@@ -111,7 +111,7 @@ class PumpEnergyApp(tk.Tk):
                     row=row, column=2, sticky="w", padx=10, pady=7)
                 self.entries[key] = entry
 
-        geometry_tab = self.tab_frames["Required Pipe Diameter"]
+        geometry_tab = self.tab_frames["Pipe Diameter"]
         for section, key in (("Inlet", "D1"), ("Outlet", "D2")):
             pipe_frame = ttk.LabelFrame(geometry_tab, text=f"{section} pipe geometry", padding=10)
             pipe_frame.pack(fill="x", pady=7)
@@ -1181,7 +1181,7 @@ class PumpEnergyApp(tk.Tk):
 
     def _build_catalog_sizing(self, parent):
         """First tab: select material, then standard and size series."""
-        ttk.Label(parent, text="Required Pipe Diameter | Catalog-Driven Pipe Sizing",
+        ttk.Label(parent, text="Pipe Diameter",
                   font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 8))
         ttk.Label(parent, text="Dimensions are indicative until verified against the specified standard and supplier. "
                   "Pressure rating, temperature, corrosion and pipe availability require separate approval.",

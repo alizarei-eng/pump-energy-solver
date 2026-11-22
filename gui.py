@@ -1201,9 +1201,11 @@ class PumpEnergyApp(tk.Tk):
         values = {key: tk.StringVar(value=default) for key,_,default in fields}
         self.catalog_sizing_vars = values
         widgets = {}
+        field_labels = {}
         for i,(key,label,default) in enumerate(fields):
             row, col = divmod(i, 2)
-            ttk.Label(form, text=label).grid(row=row, column=col*2, sticky="w", padx=5, pady=5)
+            field_labels[key] = ttk.Label(form, text=label)
+            field_labels[key].grid(row=row, column=col*2, sticky="w", padx=5, pady=5)
             if key in ("material", "standard", "series"):
                 widget = ttk.Combobox(form, textvariable=values[key], state="readonly", width=25)
             else:
@@ -1217,20 +1219,41 @@ class PumpEnergyApp(tk.Tk):
             values["standard"].set(standards[0])
         def standard_changed(*_):
             spec = CATALOGS[values["material"].get()][values["standard"].get()]
+            field_labels["series"].configure(text="SDR" if spec["mode"] == "sdr" else "Schedule" if spec["mode"] == "schedule" else "Manufacturer designation")
             widgets["series"]["values"] = spec["series"]
             values["series"].set(spec["series"][0] if spec["series"] else "")
         values["material"].trace_add("write", material_changed)
         values["standard"].trace_add("write", standard_changed)
         widgets["material"]["values"] = list(CATALOGS)
         material_changed()
+        source_label = ttk.Label(parent, wraplength=950)
+        source_label.pack(anchor="w", pady=4)
+        def update_source(*_):
+            material = values["material"].get()
+            standard = values["standard"].get()
+            if standard not in CATALOGS.get(material, {}):
+                return
+            mode = CATALOGS[material][standard]["mode"]
+            name = "SDR" if mode == "sdr" else "Schedule" if mode == "schedule" else "Manufacturer-specific"
+            source_label.configure(text=f"Source standard: {standard} | Material: {material} | "
+                                   f"Designation: {name} {values['series'].get() or 'N/A'} | "
+                                   "Dataset: preliminary, not verified against an official manufacturer catalog.")
+        for key in ("material", "standard", "series"):
+            values[key].trace_add("write", update_source)
+        update_source()
         controls = ttk.Frame(parent)
         controls.pack(fill="x", pady=5)
         status = tk.Label(parent, text="Enter conditions and calculate.", anchor="w",
                           bg="#e5e7eb", fg="#111827", padx=10, pady=8)
         status.pack(fill="x", pady=5)
-        columns = ("size", "od", "wall", "id", "velocity", "loss", "check")
+        result_filter = tk.StringVar(value="All sizes")
+        ttk.Label(controls, text="Output filter").pack(side="left", padx=(12, 4))
+        ttk.Combobox(controls, textvariable=result_filter, state="readonly", width=24,
+                     values=("All sizes", "Suitable velocity only", "High velocity only")).pack(side="left")
+        columns = ("standard", "type", "series", "size", "od", "wall", "id", "velocity", "loss", "check")
         table = ttk.Treeview(parent, columns=columns, show="headings", height=13)
         for key,label,width in (
+            ("standard","Standard",125),("type","Designation",95),("series","SDR / Schedule",115),
             ("size","Nominal size",110),("od","OD [mm]",105),("wall","Wall [mm]",105),
             ("id","ID [mm]",105),("velocity","Velocity [m/s]",130),
             ("loss","Head loss [m]",130),("check","Velocity check",145)):
@@ -1239,9 +1262,25 @@ class PumpEnergyApp(tk.Tk):
         table.tag_configure("pass", background="#dcfce7")
         table.tag_configure("fail", background="#fecaca")
         table.pack(fill="both",expand=True,pady=5)
-        def calculate():
+        cached_rows = []
+        def show_rows():
             for item in table.get_children():
                 table.delete(item)
+            for row in cached_rows:
+                if result_filter.get() == "Suitable velocity only" and not row["meets_velocity"]:
+                    continue
+                if result_filter.get() == "High velocity only" and row["meets_velocity"]:
+                    continue
+                table.insert("", "end", values=(
+                    row["standard"], row["designation_type"], row["series"], row["designation"],
+                    f'{row["od_mm"]:.1f}', f'{row["wall_mm"]:.2f}', f'{row["id_mm"]:.2f}',
+                    f'{row["velocity_m_s"]:.2f}', f'{row["head_loss_m"]:.2f}',
+                    "PASS" if row["meets_velocity"] else "HIGH VELOCITY"),
+                    tags=("pass" if row["meets_velocity"] else "fail",))
+        result_filter.trace_add("write", lambda *_: show_rows())
+        def calculate():
+            cached_rows.clear()
+            show_rows()
             try:
                 material,standard,series=(values[k].get() for k in ("material","standard","series"))
                 if not series:
@@ -1252,16 +1291,15 @@ class PumpEnergyApp(tk.Tk):
                 required,rows=size_pipes(material,standard,series,q,float(values["velocity"].get()),
                                          float(values["length"].get()),float(values["roughness"].get()),
                                          float(values["k"].get()))
-                for row in rows:
-                    table.insert("", "end", values=(row["designation"],f'{row["od_mm"]:.1f}',
-                        f'{row["wall_mm"]:.2f}',f'{row["id_mm"]:.2f}',f'{row["velocity_m_s"]:.2f}',
-                        f'{row["head_loss_m"]:.2f}',"PASS" if row["meets_velocity"] else "HIGH VELOCITY"),
-                        tags=("pass" if row["meets_velocity"] else "fail",))
+                designation_type = "SDR" if CATALOGS[material][standard]["mode"] == "sdr" else "Schedule"
+                cached_rows[:] = [{**row, "standard": standard, "designation_type": designation_type}
+                                  for row in rows]
+                show_rows()
                 eligible=[row for row in rows if row["meets_velocity"]]
                 if eligible:
                     best=eligible[0]
                     status.configure(text=f'GREEN | Required ID = {required:.1f} mm | First velocity-compliant: '
-                                     f'{best["designation"]} {series} (ID {best["id_mm"]:.1f} mm). '
+                                     f'{standard} | {best["designation"]} {designation_type} {series} (ID {best["id_mm"]:.1f} mm). '
                                      'NOT pressure-approved; verify source catalog.',
                                      bg="#bbf7d0")
                     # Share duty flow with the original pump-energy engine.

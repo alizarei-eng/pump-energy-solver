@@ -83,13 +83,16 @@ class PumpEnergyApp(tk.Tk):
 
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=16, pady=8)
-        tab_names = ["Pipe Diameter", "Pressure & Elevation", "Fluid & Losses",
-                     "Pump Performance", "System H-Q Curve", "Pump Selection", "Results & Report"]
+        tab_names = ["Pipe Diameter", "Fluid & Losses", "Pump Performance",
+                     "System H-Q Curve", "Pump Selection", "Results & Report"]
         self.tab_frames = {}
         for name in tab_names:
             tab = ttk.Frame(self.tabs, padding=16)
             self.tabs.add(tab, text=name)
             self.tab_frames[name] = tab
+        # Legacy pressure/elevation fields remain available to the shared
+        # calculation engine, but no longer need a Notebook tab.
+        self.tab_frames["Pressure & Elevation"] = ttk.Frame(self, padding=16)
 
         groups = {
             "Pipe Diameter": ["Q", "V1", "V2"],
@@ -164,11 +167,6 @@ class PumpEnergyApp(tk.Tk):
         ttk.Combobox(pressure_settings, textvariable=self.pressure_unit,
                      values=list(PRESSURE_TO_KPA), state="readonly", width=8).pack(side="left")
         ttk.Label(pressure_settings, text="Applies to P1, P2 and dP.").pack(side="left", padx=14)
-
-        # Remove this redundant tab from the visible notebook while retaining
-        # its Entry widgets, pressure unit state, solver inputs, and report logic.
-        # ttk.Notebook.hide preserves the tab and all its child widgets.
-        self.tabs.hide(self.tab_frames["Pressure & Elevation"])
 
         fluid_tab = self.tab_frames["Fluid & Losses"]
         fluid_frame = ttk.LabelFrame(fluid_tab, text="Fluid properties (automatic density)", padding=12)
@@ -1435,7 +1433,7 @@ class PumpEnergyApp(tk.Tk):
             pipe_notes = self._pipe_inputs(inputs)
         except (ValueError, KeyError) as exc:
             messagebox.showerror("Pipe geometry", str(exc))
-            self.tabs.select(self.tab_frames["Flow & Geometry"])
+            self.tabs.select(self.tab_frames["Pipe Diameter"])
             return
         if not inputs:
             messagebox.showinfo("No inputs", "Enter at least one known parameter.")

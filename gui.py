@@ -1511,35 +1511,185 @@ def add_npsh_tabs(app):
             with open(path,"w",encoding="utf-8") as f:
                 json.dump({"inputs":inputs(),"results":r},f,indent=2,ensure_ascii=False)
     ttk.Button(bar,text="Export JSON",command=export).pack(side="left",padx=5)
-    ttk.Label(analysis,text="NPSHa vs flow | NPSHr is constant unless a manufacturer curve is provided.").pack(anchor="w")
-    row=ttk.Frame(analysis);row.pack(fill="x",pady=8)
-    ttk.Label(row,text="Max flow [m3/h]").pack(side="left")
-    qmax=tk.StringVar(value="500")
-    ttk.Entry(row,textvariable=qmax,width=12).pack(side="left",padx=8)
-    geometry_label=ttk.Label(analysis,text="",wraplength=950)
+    ttk.Label(analysis, text="NPSH analysis | Manufacturer Q-NPSHr points and engineering interpretation",
+              font=("Segoe UI", 11, "bold")).pack(anchor="w")
+    controls = ttk.Frame(analysis)
+    controls.pack(fill="x", pady=4)
+    ttk.Label(controls, text="Maximum Q [m3/h]").pack(side="left")
+    qmax = tk.StringVar(value="500")
+    ttk.Entry(controls, textvariable=qmax, width=10).pack(side="left", padx=6)
+    ttk.Label(controls, text="Minimum NPSHa/NPSHr").pack(side="left", padx=(12, 4))
+    ttk.Entry(controls, textvariable=min_ratio, width=8).pack(side="left")
+
+    body = ttk.Frame(analysis)
+    body.pack(fill="both", expand=True)
+    curve_panel = ttk.LabelFrame(body, text="Manufacturer NPSHr curve points", padding=6)
+    curve_panel.pack(side="left", fill="y", padx=(0, 8))
+    ttk.Label(curve_panel, text="Q [m3/h]").grid(row=0, column=0)
+    ttk.Label(curve_panel, text="NPSHr [m]").grid(row=0, column=1)
+    point_rows = []
+    def add_point(q="", h=""):
+        idx = len(point_rows) + 1
+        qv, hv = tk.StringVar(value=str(q)), tk.StringVar(value=str(h))
+        qw = ttk.Entry(curve_panel, textvariable=qv, width=11)
+        hw = ttk.Entry(curve_panel, textvariable=hv, width=11)
+        qw.grid(row=idx, column=0, padx=2, pady=2)
+        hw.grid(row=idx, column=1, padx=2, pady=2)
+        point_rows.append((qv, hv, qw, hw))
+    def remove_point():
+        if len(point_rows) <= 2:
+            return
+        _, _, qw, hw = point_rows.pop()
+        qw.destroy()
+        hw.destroy()
+    def manufacturer_points():
+        points = []
+        for qv, hv, _, _ in point_rows:
+            if not qv.get().strip() and not hv.get().strip():
+                continue
+            q, h = float(qv.get()), float(hv.get())
+            if not (math.isfinite(q) and math.isfinite(h)) or q < 0 or h < 0:
+                raise ValueError("Manufacturer points must be nonnegative finite numbers.")
+            points.append((q, h))
+        points.sort()
+        if len(points) < 2 or len({q for q, _ in points}) != len(points):
+            raise ValueError("Provide at least two distinct manufacturer Q points.")
+        return points
+    for _ in range(3):
+        add_point()
+    point_actions = ttk.Frame(curve_panel)
+    point_actions.grid(row=1000, column=0, columnspan=2, sticky="ew", pady=4)
+    ttk.Button(point_actions, text="+ Point", command=add_point).pack(side="left")
+    ttk.Button(point_actions, text="- Point", command=remove_point).pack(side="left")
+    def save_curve():
+        try:
+            data = manufacturer_points()
+            path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
+            if path:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"manufacturer_npshr": data}, f, indent=2)
+        except Exception as exc:
+            messagebox.showerror("Manufacturer curve", str(exc))
+    def load_curve():
+        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)["manufacturer_npshr"]
+            if len(data) < 2 or len(data) > 200:
+                raise ValueError("Curve must have between 2 and 200 points.")
+            for _, _, qw, hw in point_rows:
+                qw.destroy()
+                hw.destroy()
+            point_rows.clear()
+            for q, h in data:
+                add_point(q, h)
+            manufacturer_points()
+        except Exception as exc:
+            messagebox.showerror("Manufacturer curve", str(exc))
+    ttk.Button(point_actions, text="Save", command=save_curve).pack(side="left")
+    ttk.Button(point_actions, text="Load", command=load_curve).pack(side="left")
+
+    display = ttk.Frame(body)
+    display.pack(side="left", fill="both", expand=True)
+    geometry_label = ttk.Label(display, text="", wraplength=750)
     geometry_label.pack(fill="x")
-    chart=ttk.Frame(analysis);chart.pack(fill="both",expand=True)
+    chart = ttk.Frame(display)
+    chart.pack(fill="both", expand=True)
+    explanation = tk.Text(display, height=9, wrap="word", font=("Consolas", 10))
+    explanation.pack(fill="x", pady=(5, 0))
+
     def plot():
         try:
             import numpy as np
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            d = inputs()
+            top = float(qmax.get())
+            threshold = float(min_ratio.get())
+            if not math.isfinite(top) or top <= 0:
+                raise ValueError("Maximum flow must be positive.")
+            if not math.isfinite(threshold) or threshold <= 1:
+                raise ValueError("Minimum ratio must exceed 1.")
+            points = manufacturer_points()
+            xp = np.array([p[0] for p in points], dtype=float)
+            yp = np.array([p[1] for p in points], dtype=float)
+            qs = np.linspace(0, top, 201)
+            available = np.array([calculate_npsh(**dict(d, flow_m3h=float(q)))["npsha_m"] for q in qs])
+            valid = (qs >= xp[0]) & (qs <= xp[-1])
+            qvalid = qs[valid]
+            if len(qvalid) < 2:
+                raise ValueError("Chart flow range must overlap manufacturer curve.")
+            required = np.interp(qvalid, xp, yp)
+            av = available[valid]
+            margin = av - required
+            target_margin = av - threshold * required
+            def crossings(x, y):
+                found = []
+                for i in range(len(x)-1):
+                    if y[i] == 0:
+                        found.append(float(x[i]))
+                    elif y[i]*y[i+1] < 0:
+                        found.append(float(x[i] - y[i]*(x[i+1]-x[i])/(y[i+1]-y[i])))
+                return found
             geometry_label.configure(text=geometry_warning())
-            d=inputs(); top=float(qmax.get())
-            if top<=0:raise ValueError("Maximum flow must be positive.")
-            qs=np.linspace(0,top,81)
-            a=[calculate_npsh(**dict(d,flow_m3h=float(q)))["npsha_m"] for q in qs]
-            for child in chart.winfo_children():child.destroy()
-            fig=Figure(figsize=(8,5),dpi=100)
-            ax=fig.add_subplot(111)
-            ax.plot(qs,a,label="NPSHa")
-            ax.axhline(d["npshr_m"],linestyle="--",label="NPSHr (constant assumption)")
-            ax.set(xlabel="Flow [m3/h]",ylabel="NPSH [m]",title="Available NPSH vs flow")
-            ax.grid(True);ax.legend()
-            canvas=FigureCanvasTkAgg(fig,master=chart);canvas.draw()
-            canvas.get_tk_widget().pack(fill="both",expand=True)
-        except Exception as exc:messagebox.showerror("NPSH analysis",str(exc))
-    ttk.Button(row,text="Plot NPSH",command=plot).pack(side="left")
+            for child in chart.winfo_children():
+                child.destroy()
+            fig = Figure(figsize=(7, 4), dpi=100)
+            ax = fig.add_subplot(111)
+            ax.plot(qs, available, label="NPSHa (system)")
+            ax.plot(qvalid, required, label="NPSHr (manufacturer, interpolated)")
+            ax.scatter(xp, yp, marker="o", label="Manufacturer points")
+            ax.fill_between(qvalid, av, required, where=margin < 0, alpha=0.2, label="NPSHa < NPSHr")
+            ax.set(xlabel="Flow [m3/h]", ylabel="NPSH [m]")
+            ax.grid(True)
+            ax.legend(loc="best", fontsize=8)
+            canvas = FigureCanvasTkAgg(fig, master=chart)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+            current_q = d["flow_m3h"]
+            messages = [
+                "ENGINEERING INTERPRETATION",
+                f"Manufacturer data range: {xp[0]:.2f} to {xp[-1]:.2f} m3/h (no extrapolation).",
+                f"Comparison criterion: NPSHa/NPSHr >= {threshold:.2f} (user-defined; verify OEM).",
+            ]
+            intersections = crossings(qvalid, margin)
+            safety_limits = crossings(qvalid, target_margin)
+            messages.append("NPSHa = NPSHr intersections: " +
+                            (", ".join(f"{q:.2f}" for q in intersections) + " m3/h" if intersections else "none in compared range"))
+            messages.append("Selected safety-ratio boundary: " +
+                            (", ".join(f"{q:.2f}" for q in safety_limits) + " m3/h" if safety_limits else "none in compared range"))
+            if xp[0] <= current_q <= xp[-1]:
+                r = calculate_npsh(**d)
+                required_here = float(np.interp(current_q, xp, yp))
+                margin_here = r["npsha_m"] - required_here
+                ratio_here = r["npsha_m"] / required_here if required_here > 0 else None
+                messages.append(f"Current Q = {current_q:.2f} m3/h | NPSHa = {r['npsha_m']:.3f} m | "
+                                f"NPSHr = {required_here:.3f} m | margin = {margin_here:.3f} m")
+                if margin_here <= 0:
+                    messages.append("RED: NPSHa <= manufacturer NPSHr. Unacceptable suction condition.")
+                elif ratio_here is None:
+                    messages.append("CHECK: NPSHr=0; ratio criterion cannot be assessed.")
+                elif ratio_here < threshold:
+                    messages.append("YELLOW: NPSHa exceeds NPSHr but falls below selected margin.")
+                else:
+                    messages.append("GREEN: Meets selected ratio, subject to manufacturer verification.")
+            else:
+                messages.append("Current operating Q is outside manufacturer points; no NPSHr extrapolation.")
+            if np.any(margin <= 0):
+                messages.append("At some compared flows, cavitation risk is elevated: NPSHa <= NPSHr.")
+            if np.any((margin > 0) & (target_margin < 0)):
+                messages.append("Some flows have positive NPSH margin but fail the chosen safety ratio.")
+            messages.append("NPSHr is commonly NPSH3; a positive margin does not guarantee cavitation-free operation.")
+            messages.append("Higher flow raises suction losses. Check suction restrictions, fluid temperature and inlet pressure.")
+            if d["known_loss_m"] is not None:
+                messages.append("WARNING: Fixed entered suction loss was used for all flows; this is not a physical system curve.")
+            explanation.delete("1.0", "end")
+            explanation.insert("end", "\n".join(messages))
+        except Exception as exc:
+            messagebox.showerror("NPSH analysis", str(exc))
+    ttk.Button(controls, text="Plot & Explain", command=plot).pack(side="left", padx=12)
     return vars
 
 

@@ -6,6 +6,7 @@ from tkinter import ttk, messagebox, filedialog, simpledialog
 from datetime import datetime
 from pump_energy import FIELDS, NONNEGATIVE, POSITIVE, G, solve
 from water_properties import calculate_water_properties
+from fluid_database import FluidSpec, properties_for, PROPERTY_FIELDS, property_report
 from hydraulics.npsh import calculate_npsh
 from hydraulics.pipe_catalog import CATALOGS, size_pipes
 from hydraulics.system_curve import calculate_system_curve as compute_system_curve
@@ -83,7 +84,7 @@ class PumpEnergyApp(tk.Tk):
 
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=16, pady=8)
-        tab_names = ["Pipe Diameter", "Fluid & Losses", "Pump Performance",
+        tab_names = ["Pipe Diameter", "Fluid Properties", "Pump Performance",
                      "System H-Q Curve", "Pump Selection", "Results & Report"]
         self.tab_frames = {}
         for name in tab_names:
@@ -97,7 +98,7 @@ class PumpEnergyApp(tk.Tk):
         groups = {
             "Pipe Diameter": ["Q", "V1", "V2"],
             "Pressure & Elevation": ["P1", "P2", "dP", "dz"],
-            "Fluid & Losses": ["hL"],
+            "Fluid Properties": ["hL"],
             "Pump Performance": ["Hp", "eta", "Ph", "Ps"],
         }
         for tab_name, keys in groups.items():
@@ -168,21 +169,8 @@ class PumpEnergyApp(tk.Tk):
                      values=list(PRESSURE_TO_KPA), state="readonly", width=8).pack(side="left")
         ttk.Label(pressure_settings, text="Applies to P1, P2 and dP.").pack(side="left", padx=14)
 
-        fluid_tab = self.tab_frames["Fluid & Losses"]
-        fluid_frame = ttk.LabelFrame(fluid_tab, text="Fluid properties (automatic density)", padding=12)
-        fluid_frame.pack(fill="x", pady=12)
-        ttk.Label(fluid_frame, text="Fluid").grid(row=0, column=0, sticky="w", pady=7)
-        ttk.Combobox(fluid_frame, textvariable=self.fluid,
-                     values=["freshwater", "seawater"], state="readonly", width=14).grid(
-                         row=0, column=1, sticky="w", padx=12, pady=7)
-        ttk.Label(fluid_frame, text="Temperature [°C]").grid(row=1, column=0, sticky="w", pady=7)
-        ttk.Entry(fluid_frame, textvariable=self.temperature, width=10).grid(
-            row=1, column=1, sticky="w", padx=12, pady=7)
-        ttk.Label(fluid_frame, text="EC [mS/cm] (in-situ)").grid(row=2, column=0, sticky="w", pady=7)
-        self.ec_entry = ttk.Entry(fluid_frame, textvariable=self.ec, width=10)
-        self.ec_entry.grid(row=2, column=1, sticky="w", padx=12, pady=7)
-        self.fluid.trace_add("write", lambda *_: self.ec_entry.configure(
-            state="normal" if self.fluid.get() == "seawater" else "disabled"))
+        fluid_tab = self.tab_frames["Fluid Properties"]
+        self._build_fluid_properties(fluid_tab)
 
         system_tab = self.tab_frames["System H-Q Curve"]
         ttk.Label(system_tab, text="System Curve | Multi-segment pipe and fitting losses",
@@ -1181,6 +1169,95 @@ class PumpEnergyApp(tk.Tk):
                     file.write(self.system_report)
             except OSError as exc:
                 messagebox.showerror("Export failed", str(exc))
+
+    def _fluid_spec(self):
+        """Validated inputs shared by the energy solver and system curve."""
+        water_type = self.fluid.get()
+        temperature = float(self.temperature.get())
+        ec = float(self.ec.get()) if water_type == "seawater" else None
+        pressure = float(self.fluid_pressure.get())
+        latitude = float(self.fluid_latitude.get()) if self.fluid_latitude.get().strip() else None
+        longitude = float(self.fluid_longitude.get()) if self.fluid_longitude.get().strip() else None
+        if (latitude is None) != (longitude is None):
+            raise ValueError("Enter both latitude and longitude, or leave both blank.")
+        return FluidSpec(water_type=water_type, temperature_C=temperature,
+                         ec_ms_cm=ec, pressure_MPa_abs=pressure,
+                         latitude_deg=latitude, longitude_deg=longitude)
+
+    def _build_fluid_properties(self, parent):
+        ttk.Label(parent, text="Fluid Properties | Shared Water Model",
+                  font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        ttk.Label(parent, text="IAPWS-IF97 freshwater; PSS-78 / TEOS-10 seawater density; "
+                  "Sharqawy viscosity and seawater vapor pressure. "
+                  "EC must be measured in situ, not temperature-compensated.",
+                  wraplength=950).pack(anchor="w", pady=6)
+        form = ttk.LabelFrame(parent, text="Reference fluid state", padding=10)
+        form.pack(fill="x", pady=8)
+        self.fluid_pressure = tk.StringVar(value="0.101325")
+        self.fluid_latitude = tk.StringVar(value="")
+        self.fluid_longitude = tk.StringVar(value="")
+        fields = [
+            ("Fluid type", self.fluid), ("Temperature [C]", self.temperature),
+            ("EC in situ [mS/cm]", self.ec), ("Absolute pressure [MPa]", self.fluid_pressure),
+            ("Latitude [deg] (optional)", self.fluid_latitude),
+            ("Longitude [deg] (optional)", self.fluid_longitude)]
+        for i,(label,var) in enumerate(fields):
+            row,col=divmod(i,2)
+            ttk.Label(form,text=label).grid(row=row,column=col*2,sticky="w",padx=5,pady=5)
+            if i==0:
+                widget=ttk.Combobox(form,textvariable=var,values=("seawater","freshwater"),
+                                    state="readonly",width=22)
+            else:
+                widget=ttk.Entry(form,textvariable=var,width=24)
+            widget.grid(row=row,column=col*2+1,sticky="w",padx=5,pady=5)
+            if i==2:
+                self.ec_entry=widget
+        self.fluid.trace_add("write",lambda *_: self.ec_entry.configure(
+            state="normal" if self.fluid.get()=="seawater" else "disabled"))
+        ttk.Button(parent,text="Calculate / Apply to System",
+                   command=self._apply_fluid_properties).pack(anchor="w",pady=6)
+        self.fluid_status=ttk.Label(parent,text="Calculate to apply one fluid state to the hydraulic modules.")
+        self.fluid_status.pack(anchor="w",pady=4)
+        columns=("property","value","unit")
+        table=ttk.Treeview(parent,columns=columns,show="headings",height=10)
+        for key,label,width in (("property","Property",320),("value","Calculated value",200),("unit","Unit",140)):
+            table.heading(key,text=label)
+            table.column(key,width=width,anchor="w")
+        table.pack(fill="both",expand=True,pady=4)
+        self.fluid_table=table
+        self.fluid_details=tk.Text(parent,height=7,wrap="word")
+        self.fluid_details.pack(fill="both",expand=True,pady=5)
+        self.fluid_details.configure(state="disabled")
+
+    def _apply_fluid_properties(self):
+        try:
+            spec=self._fluid_spec()
+            props=properties_for(spec)
+            if props.get("density_kg_m3") is None or props.get("kinematic_viscosity_m2_s") is None:
+                raise ValueError("Density and viscosity must be available.")
+            for item in self.fluid_table.get_children():
+                self.fluid_table.delete(item)
+            for key,label,unit in PROPERTY_FIELDS:
+                value=props.get(key)
+                if value is not None:
+                    self.fluid_table.insert("","end",values=(label,f"{value:.9g}",unit))
+            report=property_report(props)
+            self.fluid_details.configure(state="normal")
+            self.fluid_details.delete("1.0","end")
+            self.fluid_details.insert("1.0",report)
+            self.fluid_details.configure(state="disabled")
+            # Keep the system-curve inputs synchronized with the shared fluid
+            # without changing existing project-file schemas.
+            self.system_fluid.set(spec.water_type)
+            us=self.system_units.get()=="US"
+            self.system_vars["temp"].set(f"{(spec.temperature_C*9/5+32) if us else spec.temperature_C:.10g}")
+            if spec.ec_ms_cm is not None:
+                self.system_vars["ec"].set(f"{spec.ec_ms_cm:.10g}")
+            self.fluid_status.configure(text="Applied to energy solver and system curve. "
+                "NPSH has separate suction-condition inputs; its vapor pressure is calculated by the same water model.")
+            self._invalidate_system_results()
+        except (ValueError,TypeError,ImportError,ArithmeticError,NotImplementedError) as exc:
+            messagebox.showerror("Fluid Properties",str(exc))
 
     def _build_catalog_sizing(self, parent):
         """First tab: select material, then standard and size series."""

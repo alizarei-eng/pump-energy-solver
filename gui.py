@@ -1416,10 +1416,10 @@ NPSH_FIELDS = [
     ("ec_ms_cm", "In-situ EC [mS/cm]", "58"),
     ("flow_m3h", "Flow [m3/h]", "150"),
     ("inside_diameter_mm", "Suction internal diameter [mm]", "200"),
-    ("length_m", "Suction length [m]", "10"),
+    ("length_m", "Total Suction Pipe Length [m]", "10"),
     ("roughness_mm", "Roughness [mm]", "0.0015"),
-    ("fittings_k", "Total fittings K", "1"),
-    ("static_height_m", "Surface elevation - pump inlet [m]", "7"),
+    ("fittings_k", "Suction Fittings Loss Coefficient K", "1"),
+    ("static_height_m", "Static Suction Elevation Difference [m]", "7"),
     ("surface_pressure_bar_abs", "Surface pressure [bar ABS]", "1.01325"),
     ("npshr_m", "Pump NPSHr [m]", "4"),
     ("known_loss_m", "Known suction loss [m] (optional)", ""),
@@ -1457,9 +1457,24 @@ def add_npsh_tabs(app):
         d={k:(v.get() if k=="water_type" else (None if k=="known_loss_m" and not v.get().strip() else float(v.get())))
            for k,v in vars.items()}
         return d
+    def geometry_warning():
+        d = inputs()
+        # A surface-to-pump elevation difference is not necessarily the
+        # entrance-to-pump difference when the pipe entrance is submerged.
+        length, dz = d["length_m"], d["static_height_m"]
+        if length < abs(dz):
+            return ("GEOMETRY WARNING: Suction pipe length is shorter than the "
+                    "surface-to-pump elevation difference. If the pipe entrance "
+                    "is submerged, check its actual elevation before deciding "
+                    "whether the pipe length is physically inconsistent.")
+        return ("GEOMETRY NOTE: Verify pipe entrance submergence and routing; "
+                "surface-to-pump elevation alone cannot validate pipe length.")
+
     def calc_result():
         try:
+            note = geometry_warning()
             r=calculate_npsh(**inputs())
+            r["geometry_note"] = note
             threshold = float(min_ratio.get())
             if not math.isfinite(threshold) or threshold <= 1:
                 raise ValueError("Green threshold must be a finite number greater than 1.")
@@ -1501,12 +1516,15 @@ def add_npsh_tabs(app):
     ttk.Label(row,text="Max flow [m3/h]").pack(side="left")
     qmax=tk.StringVar(value="500")
     ttk.Entry(row,textvariable=qmax,width=12).pack(side="left",padx=8)
+    geometry_label=ttk.Label(analysis,text="",wraplength=950)
+    geometry_label.pack(fill="x")
     chart=ttk.Frame(analysis);chart.pack(fill="both",expand=True)
     def plot():
         try:
             import numpy as np
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            geometry_label.configure(text=geometry_warning())
             d=inputs(); top=float(qmax.get())
             if top<=0:raise ValueError("Maximum flow must be positive.")
             qs=np.linspace(0,top,81)

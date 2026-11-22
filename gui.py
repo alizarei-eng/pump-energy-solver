@@ -893,8 +893,12 @@ class PumpEnergyApp(tk.Tk):
                 raise ValueError("Maximum flow must be positive.")
             fluid = self.system_fluid.get()
             ec = number(self.system_vars["ec"], "EC") if fluid == "seawater" else None
-            props = calculate_water_properties(temperature_C=temp, water_type=fluid,
-                EC_value=ec, EC_unit="mS/cm" if ec is not None else None)
+            # The system curve uses the same validated property service.
+            # Local system settings remain editable for loaded legacy projects.
+            props = properties_for(FluidSpec(water_type=fluid, temperature_C=temp,
+                ec_ms_cm=ec, pressure_MPa_abs=float(self.fluid_pressure.get()),
+                latitude_deg=(float(self.fluid_latitude.get()) if self.fluid_latitude.get().strip() else None),
+                longitude_deg=(float(self.fluid_longitude.get()) if self.fluid_longitude.get().strip() else None)))
             rho, nu = props["density_kg_m3"], props["kinematic_viscosity_m2_s"]
             if not rho or not nu or rho <= 0 or nu <= 0:
                 raise ValueError("Fluid property calculation returned invalid density or viscosity.")
@@ -1519,13 +1523,7 @@ class PumpEnergyApp(tk.Tk):
             t = float(self.temperature.get())
             if not math.isfinite(t):
                 raise ValueError("Temperature must be finite")
-            kwargs = {"temperature_C": t, "water_type": self.fluid.get(), "pressure_MPa_abs": 0.101325}
-            if self.fluid.get() == "seawater":
-                ec = float(self.ec.get())
-                if not math.isfinite(ec) or ec <= 0:
-                    raise ValueError("Seawater EC must be positive and finite")
-                kwargs.update(EC_value=ec, EC_unit="mS/cm", conductivity_temperature_mode="in_situ")
-            props = calculate_water_properties(**kwargs)
+            props = properties_for(self._fluid_spec())
             inputs["rho"] = props["density_kg_m3"]
         except (ValueError, ImportError, ArithmeticError, NotImplementedError) as exc:
             messagebox.showerror("Fluid properties", str(exc))
